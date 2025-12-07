@@ -149,9 +149,11 @@ def _parse_docblock(doc: str) -> dict:
             name = name.rstrip("?")
             detail = rest[1] if len(rest) > 1 else ""
             if detail:
-                params.append(f"{name} ({'optional' if optional else 'required'}): {detail}")
+                params.append(
+                    f"{name} ({'optional' if optional else 'required'}): {detail}")
             else:
-                params.append(f"{name} ({'optional' if optional else 'required'})")
+                params.append(
+                    f"{name} ({'optional' if optional else 'required'})")
             continue
         if ln.startswith("@return"):
             _, *rest = ln.split(maxsplit=1)
@@ -256,7 +258,8 @@ def _scan_types_for_symbol(symbol: str):
         if signature:
             doc = _extract_docblock(text, signature)
             parsed_doc = _parse_docblock(doc) if doc else {}
-            constants = list(dict.fromkeys(_fuzzy_constants_for_symbol(symbol)))
+            constants = list(dict.fromkeys(
+                _fuzzy_constants_for_symbol(symbol)))
             return {
                 "signature": signature,
                 "params": parsed_doc.get("params"),
@@ -271,8 +274,18 @@ def _scan_types_for_symbol(symbol: str):
 def _suggest_symbols(conn: sqlite3.Connection, symbol: str, limit: int = 10):
     """Return fuzzy symbol suggestions from the symbols table."""
     try:
+        # Check if symbols table exists
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='symbols'"
+        )
+        if not cursor.fetchone():
+            return []
+
         rows = conn.execute("SELECT full_name FROM symbols").fetchall()
         candidates = [r[0] for r in rows] if rows else []
+        if not candidates:
+            return []
+
         ranked = difflib.get_close_matches(
             symbol, candidates, n=limit * 4, cutoff=0
         )
@@ -310,6 +323,8 @@ def get_types(symbol: str):
     if consts:
         return consts
 
+    # Ensure DB directory exists
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
@@ -391,8 +406,14 @@ def get_smart_context(symbol: str):
             pass  # fall through to suggestions
 
     # No direct hit: return suggestions from symbols to guide the caller
-    conn = sqlite3.connect(DB_PATH)
-    suggestions = _suggest_symbols(conn, symbol, limit=5)
+    try:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(DB_PATH)
+        suggestions = _suggest_symbols(conn, symbol, limit=5)
+        conn.close()
+    except Exception:
+        suggestions = []
+
     return {
         "did_you_mean": suggestions[0] if suggestions else None,
         "suggestions": suggestions

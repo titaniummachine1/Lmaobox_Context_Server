@@ -2,7 +2,7 @@
 
 -- Constants: E_Hitbox
 -- Auto-generated from: https://lmaobox.net/lua/Lua_Constants/
--- Last updated: 2025-12-07T00:20:56.433Z
+-- Last updated: 2025-12-07T21:34:00.175Z
 
 ---@type integer
 HITBOX_HEAD = 0

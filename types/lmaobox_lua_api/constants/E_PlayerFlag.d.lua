@@ -2,7 +2,7 @@
 
 -- Constants: E_PlayerFlag
 -- Auto-generated from: https://lmaobox.net/lua/Lua_Constants/
--- Last updated: 2025-12-07T00:20:56.426Z
+-- Last updated: 2025-12-07T21:34:00.162Z
 
 ---@type any
 FL_ONGROUND = 1 << 0
