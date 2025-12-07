@@ -1,0 +1,34 @@
+---@meta
+
+-- Entity Props: CTFPlayerResource
+-- Auto-generated from: https://lmaobox.net/lua/TF2_props
+-- Last updated: 2025-12-07T00:41:41.545Z
+
+---@class CTFPlayerResource
+---@field m_iTotalScore any
+---@field m_iMaxHealth any
+---@field m_iMaxBuffedHealth any
+---@field m_iPlayerClass any
+---@field m_bArenaSpectator any
+---@field m_iActiveDominations any
+---@field m_flNextRespawnTime any
+---@field m_iChargeLevel any
+---@field m_iDamage any
+---@field m_iDamageAssist any
+---@field m_iDamageBoss any
+---@field m_iHealing any
+---@field m_iHealingAssist any
+---@field m_iDamageBlocked any
+---@field m_iCurrencyCollected any
+---@field m_iBonusPoints any
+---@field m_iPlayerLevel any
+---@field m_iStreaks any
+---@field m_iUpgradeRefundCredits any
+---@field m_iBuybackCredits any
+---@field m_iPartyLeaderRedTeamIndex number
+---@field m_iPartyLeaderBlueTeamIndex number
+---@field m_iEventTeamStatus number
+---@field m_iPlayerClassWhenKilled any
+---@field m_iConnectionState any
+---@field m_flConnectTime any
+local CTFPlayerResource = {}

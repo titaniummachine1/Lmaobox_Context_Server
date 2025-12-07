@@ -1,0 +1,46 @@
+---@meta
+
+-- Entity Props: CBaseTeamObjectiveResource
+-- Auto-generated from: https://lmaobox.net/lua/TF2_props
+-- Last updated: 2025-12-07T00:41:41.628Z
+
+---@class CBaseTeamObjectiveResource
+---@field m_iTimerToShowInHUD number
+---@field m_iStopWatchTimer number
+---@field m_iNumControlPoints number
+---@field m_bPlayingMiniRounds number
+---@field m_bControlPointsReset number
+---@field m_iUpdateCapHudParity number
+---@field m_vCPPositions any
+---@field m_bCPIsVisible any
+---@field m_flLazyCapPerc any
+---@field m_iTeamIcons any
+---@field m_iTeamOverlays any
+---@field m_iTeamReqCappers any
+---@field m_flTeamCapTime any
+---@field m_iPreviousPoints any
+---@field m_bTeamCanCap any
+---@field m_iTeamBaseIcons any
+---@field m_iBaseControlPoints any
+---@field m_bInMiniRound any
+---@field m_iWarnOnCap any
+---@field m_iszWarnSound any
+---@field m_flPathDistance any
+---@field m_iCPGroup any
+---@field m_bCPLocked any
+---@field m_nNumNodeHillData any
+---@field m_flNodeHillData any
+---@field m_bTrackAlarm any
+---@field m_flUnlockTimes any
+---@field m_bHillIsDownhill any
+---@field m_flCPTimerTimes any
+---@field m_iNumTeamMembers any
+---@field m_iCappingTeam any
+---@field m_iTeamInZone any
+---@field m_bBlocked any
+---@field m_iOwner any
+---@field m_bCPCapRateScalesWithPlayers any
+---@field m_pszCapLayoutInHUD string
+---@field m_flCustomPositionX number
+---@field m_flCustomPositionY number
+local CBaseTeamObjectiveResource = {}

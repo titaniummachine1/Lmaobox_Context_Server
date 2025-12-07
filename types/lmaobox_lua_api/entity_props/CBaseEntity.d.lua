@@ -1,0 +1,48 @@
+---@meta
+
+-- Entity Props: CBaseEntity
+-- Auto-generated from: https://lmaobox.net/lua/TF2_props
+-- Last updated: 2025-12-07T00:41:41.710Z
+
+---@class CBaseEntity
+---@field m_flAnimTime number
+---@field m_flSimulationTime number
+---@field m_ubInterpolationFrame number
+---@field m_vecOrigin Vector3
+---@field m_angRotation Vector3
+---@field m_nModelIndex number
+---@field m_fEffects number
+---@field m_nRenderMode number
+---@field m_nRenderFX number
+---@field m_clrRender number
+---@field m_iTeamNum number
+---@field m_CollisionGroup number
+---@field m_flElasticity number
+---@field m_flShadowCastDistance number
+---@field m_hOwnerEntity number
+---@field m_hEffectEntity number
+---@field moveparent number
+---@field m_iParentAttachment number
+---@field movetype number
+---@field movecollide number
+---@field m_iTextureFrameIndex number
+---@field m_bSimulatedEveryTick number
+---@field m_bAnimatedEveryTick number
+---@field m_bAlternateSorting number
+---@field m_nModelIndexOverrides any
+---@field m_vecMinsPreScaled Vector3
+---@field m_vecMaxsPreScaled Vector3
+---@field m_vecMins Vector3
+---@field m_vecMaxs Vector3
+---@field m_nSolidType number
+---@field m_usSolidFlags number
+---@field m_nSurroundType number
+---@field m_triggerBloat number
+---@field m_bUniformTriggerBloat number
+---@field m_vecSpecifiedSurroundingMinsPreScaled Vector3
+---@field m_vecSpecifiedSurroundingMaxsPreScaled Vector3
+---@field m_vecSpecifiedSurroundingMins Vector3
+---@field m_vecSpecifiedSurroundingMaxs Vector3
+---@field m_PredictableID number
+---@field m_bIsPlayerSimulated number
+local CBaseEntity = {}

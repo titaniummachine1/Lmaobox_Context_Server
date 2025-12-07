@@ -1,0 +1,79 @@
+---@meta
+
+-- Entity Props: CBasePlayer
+-- Auto-generated from: https://lmaobox.net/lua/TF2_props
+-- Last updated: 2025-12-07T00:41:41.707Z
+
+---@class CBasePlayer
+---@field m_iFOV number
+---@field m_iFOVStart number
+---@field m_flFOVTime number
+---@field m_iDefaultFOV number
+---@field m_hZoomOwner number
+---@field m_hVehicle number
+---@field m_hUseEntity number
+---@field m_iHealth number
+---@field m_lifeState number
+---@field m_iBonusProgress number
+---@field m_iBonusChallenge number
+---@field m_flMaxspeed number
+---@field m_fFlags number
+---@field m_iObserverMode number
+---@field m_hObserverTarget number
+---@field m_hViewModel any
+---@field m_szLastPlaceName string
+---@field m_flFriction number
+---@field m_iAmmo any
+---@field m_fOnTarget number
+---@field m_nTickBase number
+---@field m_nNextThinkTick number
+---@field m_hLastWeapon number
+---@field m_hGroundEntity number
+---@field m_vecBaseVelocity Vector3
+---@field m_hConstraintEntity number
+---@field m_vecConstraintCenter Vector3
+---@field m_flConstraintRadius number
+---@field m_flConstraintWidth number
+---@field m_flConstraintSpeedFactor number
+---@field m_flDeathTime number
+---@field m_nWaterLevel number
+---@field m_flLaggedMovementValue number
+---@field m_chAreaBits any
+---@field m_chAreaPortalBits any
+---@field m_iHideHUD number
+---@field m_flFOVRate number
+---@field m_bDucked number
+---@field m_bDucking number
+---@field m_bInDuckJump number
+---@field m_flDucktime number
+---@field m_flDuckJumpTime number
+---@field m_flJumpTime number
+---@field m_flFallVelocity number
+---@field m_vecPunchAngle Vector3
+---@field m_vecPunchAngleVel Vector3
+---@field m_bDrawViewmodel number
+---@field m_bWearingSuit number
+---@field m_bPoisoned number
+---@field m_bForceLocalPlayerDraw number
+---@field m_flStepSize number
+---@field m_bAllowAutoMovement number
+---@field scale number
+---@field origin Vector3
+---@field area number
+---@field enable number
+---@field blend number
+---@field dirPrimary Vector3
+---@field colorPrimary number
+---@field colorSecondary number
+---@field start number
+---@field end number
+---@field maxdensity number
+---@field m_hCtrl number
+---@field soundscapeIndex number
+---@field localBits number
+---@field entIndex number
+---@field m_szScriptOverlayMaterial string
+---@field lengthprop20 number
+---@field deadflag number
+---@field lengthprop8 number
+local CBasePlayer = {}

@@ -1,0 +1,32 @@
+---@meta
+
+-- Entity Props: CFunc_Dust
+-- Auto-generated from: https://lmaobox.net/lua/TF2_props
+-- Last updated: 2025-12-07T00:41:41.673Z
+
+---@class CFunc_Dust
+---@field m_Color number
+---@field m_SpawnRate number
+---@field m_flSizeMin number
+---@field m_flSizeMax number
+---@field m_LifetimeMin number
+---@field m_LifetimeMax number
+---@field m_DustFlags number
+---@field m_SpeedMax number
+---@field m_DistMax number
+---@field m_nModelIndex number
+---@field m_FallSpeed number
+---@field m_vecMinsPreScaled Vector3
+---@field m_vecMaxsPreScaled Vector3
+---@field m_vecMins Vector3
+---@field m_vecMaxs Vector3
+---@field m_nSolidType number
+---@field m_usSolidFlags number
+---@field m_nSurroundType number
+---@field m_triggerBloat number
+---@field m_bUniformTriggerBloat number
+---@field m_vecSpecifiedSurroundingMinsPreScaled Vector3
+---@field m_vecSpecifiedSurroundingMaxsPreScaled Vector3
+---@field m_vecSpecifiedSurroundingMins Vector3
+---@field m_vecSpecifiedSurroundingMaxs Vector3
+local CFunc_Dust = {}

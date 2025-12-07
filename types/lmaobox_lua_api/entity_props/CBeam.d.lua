@@ -1,0 +1,34 @@
+---@meta
+
+-- Entity Props: CBeam
+-- Auto-generated from: https://lmaobox.net/lua/TF2_props
+-- Last updated: 2025-12-07T00:41:41.728Z
+
+---@class CBeam
+---@field m_nBeamType number
+---@field m_nBeamFlags number
+---@field m_nNumBeamEnts number
+---@field m_hAttachEntity any
+---@field m_nAttachIndex any
+---@field m_nHaloIndex number
+---@field m_fHaloScale number
+---@field m_fWidth number
+---@field m_fEndWidth number
+---@field m_fFadeLength number
+---@field m_fAmplitude number
+---@field m_fStartFrame number
+---@field m_fSpeed number
+---@field m_flFramerate number
+---@field m_flHDRColorScale number
+---@field m_clrRender number
+---@field m_nRenderFX number
+---@field m_nRenderMode number
+---@field m_flFrame number
+---@field m_vecEndPos Vector3
+---@field m_nModelIndex number
+---@field m_nMinDXLevel number
+---@field m_vecOrigin Vector3
+---@field moveparent number
+---@field m_PredictableID number
+---@field m_bIsPlayerSimulated number
+local CBeam = {}

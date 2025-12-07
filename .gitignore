@@ -1,0 +1,39 @@
+# Node / JS
+node_modules/
+automations/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Caches & build output
+.cache/
+automations/.cache/
+dist/
+build/
+coverage/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Editors
+.vscode/
+.idea/
+
+# Processing zones (input/output churn)
+processing_zone/01_TO_PROCESS/*
+processing_zone/02_IN_PROGRESS/*
+processing_zone/03_DONE/*
+RAW_NOTES/*
+
+# Data artifacts
+data/*.db
+data/*.sqlite
+data/*.log
+data/cache/
+data/tmp/
+
+# Keep placeholder markers
+!**/.gitkeep
+

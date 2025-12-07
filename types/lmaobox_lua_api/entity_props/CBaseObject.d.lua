@@ -1,0 +1,34 @@
+---@meta
+
+-- Entity Props: CBaseObject
+-- Auto-generated from: https://lmaobox.net/lua/TF2_props
+-- Last updated: 2025-12-07T00:41:41.575Z
+
+---@class CBaseObject
+---@field m_iHealth number
+---@field m_iMaxHealth number
+---@field m_bHasSapper number
+---@field m_iObjectType number
+---@field m_bBuilding number
+---@field m_bPlacing number
+---@field m_bCarried number
+---@field m_bCarryDeploy number
+---@field m_bMiniBuilding number
+---@field m_flPercentageConstructed number
+---@field m_fObjectFlags number
+---@field m_hBuiltOnEntity number
+---@field m_bDisabled number
+---@field m_hBuilder number
+---@field m_vecBuildMaxs Vector3
+---@field m_vecBuildMins Vector3
+---@field m_iDesiredBuildRotations number
+---@field m_bServerOverridePlacement number
+---@field m_iUpgradeLevel number
+---@field m_iUpgradeMetal number
+---@field m_iUpgradeMetalRequired number
+---@field m_iHighestUpgradeLevel number
+---@field m_iObjectMode number
+---@field m_bDisposableBuilding number
+---@field m_bWasMapPlaced number
+---@field m_bPlasmaDisable number
+local CBaseObject = {}

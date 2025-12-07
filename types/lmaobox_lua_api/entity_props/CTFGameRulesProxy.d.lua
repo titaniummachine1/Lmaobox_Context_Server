@@ -1,0 +1,61 @@
+---@meta
+
+-- Entity Props: CTFGameRulesProxy
+-- Auto-generated from: https://lmaobox.net/lua/TF2_props
+-- Last updated: 2025-12-07T00:41:41.539Z
+
+---@class CTFGameRulesProxy
+---@field m_nGameType number
+---@field m_nStopWatchState number
+---@field m_pszTeamGoalStringRed string
+---@field m_pszTeamGoalStringBlue string
+---@field m_flCapturePointEnableTime number
+---@field m_nHudType number
+---@field m_bIsInTraining number
+---@field m_bAllowTrainingAchievements number
+---@field m_bIsWaitingForTrainingContinue number
+---@field m_bIsTrainingHUDVisible number
+---@field m_bIsInItemTestingMode number
+---@field m_hBonusLogic number
+---@field m_bPlayingKoth number
+---@field m_bPlayingMedieval number
+---@field m_bPlayingHybrid_CTF_CP number
+---@field m_bPlayingSpecialDeliveryMode number
+---@field m_bPlayingRobotDestructionMode number
+---@field m_hRedKothTimer number
+---@field m_hBlueKothTimer number
+---@field m_nMapHolidayType number
+---@field m_itHandle number
+---@field m_bPlayingMannVsMachine number
+---@field m_hBirthdayPlayer number
+---@field m_nBossHealth number
+---@field m_nMaxBossHealth number
+---@field m_fBossNormalizedTravelDistance number
+---@field m_bMannVsMachineAlarmStatus number
+---@field m_bHaveMinPlayersToEnableReady number
+---@field m_bBountyModeEnabled number
+---@field m_nHalloweenEffect number
+---@field m_fHalloweenEffectStartTime number
+---@field m_fHalloweenEffectDuration number
+---@field m_halloweenScenario number
+---@field m_bHelltowerPlayersInHell number
+---@field m_bIsUsingSpells number
+---@field m_bCompetitiveMode number
+---@field m_nMatchGroupType number
+---@field m_bMatchEnded number
+---@field m_bPowerupMode number
+---@field m_pszCustomUpgradesFile string
+---@field m_bTruceActive number
+---@field m_bShowMatchSummary number
+---@field m_bShowCompetitiveMatchSummary number
+---@field m_bTeamsSwitched number
+---@field m_bMapHasMatchSummaryStage number
+---@field m_bPlayersAreOnMatchSummaryStage number
+---@field m_bStopWatchWinner number
+---@field m_ePlayerWantsRematch any
+---@field m_eRematchState number
+---@field m_nNextMapVoteOptions any
+---@field m_nForceUpgrades number
+---@field m_nForceEscortPushLogic number
+---@field m_bRopesHolidayLightsAllowed number
+local CTFGameRulesProxy = {}

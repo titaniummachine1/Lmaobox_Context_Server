@@ -1,0 +1,31 @@
+---@meta
+
+-- Entity Props: CTFRagdoll
+-- Auto-generated from: https://lmaobox.net/lua/TF2_props
+-- Last updated: 2025-12-07T00:41:41.556Z
+
+---@class CTFRagdoll
+---@field m_vecRagdollOrigin Vector3
+---@field m_hPlayer number
+---@field m_vecForce Vector3
+---@field m_vecRagdollVelocity Vector3
+---@field m_nForceBone number
+---@field m_bGib number
+---@field m_bBurning number
+---@field m_bElectrocuted number
+---@field m_bFeignDeath number
+---@field m_bWasDisguised number
+---@field m_bOnGround number
+---@field m_bCloaked number
+---@field m_bBecomeAsh number
+---@field m_iDamageCustom number
+---@field m_iTeam number
+---@field m_iClass number
+---@field lengthprop8 number
+---@field m_bGoldRagdoll number
+---@field m_bIceRagdoll number
+---@field m_bCritOnHardHit number
+---@field m_flHeadScale number
+---@field m_flTorsoScale number
+---@field m_flHandScale number
+local CTFRagdoll = {}
