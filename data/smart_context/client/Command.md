@@ -31,3 +31,4 @@ client.Command("say Hello", true)
 ### Notes
 - unrestrict=true bypasses some command restrictions
 - Use sparingly; commands can be logged
+

@@ -15,3 +15,4 @@ end
 ### Notes
 - Returns nil if not connected
 - Use NetChannel methods for latency/packet stats
+

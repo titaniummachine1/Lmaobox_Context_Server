@@ -20,3 +20,4 @@ local chamsMat = materials.Create("chams_flat", [[
 
 ### Notes
 - VMT syntax: see Valve Developer Wiki for material parameters
+

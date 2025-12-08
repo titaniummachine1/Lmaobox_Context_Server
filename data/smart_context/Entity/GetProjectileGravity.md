@@ -18,3 +18,4 @@ end
 ### Notes
 - Returns nil if not a projectile weapon
 - Can return 0 if hardcoded; default gravity is often 1.0 or specific per weapon
+

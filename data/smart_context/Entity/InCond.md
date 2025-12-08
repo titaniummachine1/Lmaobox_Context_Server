@@ -38,3 +38,4 @@ end
 ### Notes
 - Use TFCond_* constants from E_TFCOND enum
 - Common conditions: Ubercharged, Cloaked, Kritzkrieged, Bonked, Jarated, OnFire, Bleeding
+

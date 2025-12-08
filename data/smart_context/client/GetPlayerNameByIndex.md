@@ -11,3 +11,4 @@ print("Player " .. playerIdx .. ": " .. name)
 
 ### Notes
 - Alternative to `entities.GetByIndex(idx):GetName()`
+

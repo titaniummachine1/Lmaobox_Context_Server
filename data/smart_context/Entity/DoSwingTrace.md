@@ -21,3 +21,4 @@ end
 ### Notes
 - Simulates what the melee swing would hit (doesn't actually swing)
 - Use for melee aimbot target detection
+

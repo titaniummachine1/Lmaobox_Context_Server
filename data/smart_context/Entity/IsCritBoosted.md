@@ -13,3 +13,4 @@ end
 
 ### Notes
 - Does not include mini-crits; only full crit boost
+

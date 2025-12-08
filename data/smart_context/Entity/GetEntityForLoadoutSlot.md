@@ -21,3 +21,4 @@ end
 ### Notes
 - Returns Entity or nil
 - Use for checking equipped items/weapons
+

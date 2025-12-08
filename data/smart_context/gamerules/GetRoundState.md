@@ -11,3 +11,4 @@ local state = gamerules.GetRoundState()
 
 ### Notes
 - Use to check if round is active, in setup, ending, etc.
+

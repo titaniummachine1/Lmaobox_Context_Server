@@ -17,3 +17,4 @@ end
 ### Notes
 - Returns nil if not melee
 - Typical TF2 melee range: 48-72 units
+

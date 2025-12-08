@@ -11,3 +11,4 @@ local dt = globals.FrameTime()
 
 ### Notes
 - May return tick interval in some callbacks; use AbsoluteFrameTime if needed
+

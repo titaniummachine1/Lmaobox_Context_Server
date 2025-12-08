@@ -88,9 +88,72 @@ for i = 1, entities.GetHighestEntityIndex() do
 end
 ```
 
+#### Wall collision detection (movement simulation)
+
+```lua
+local function CheckWallCollision(from, to, hullMins, hullMaxs, shouldHitEntity)
+    local trace = engine.TraceHull(from, to, hullMins, hullMaxs, MASK_PLAYERSOLID, shouldHitEntity)
+
+    if trace.fraction < 1 then
+        local normal = trace.plane
+        local angle = math.deg(math.acos(normal:Dot(Vector3(0, 0, 1))))
+
+        if angle > 55 then
+            -- Wall is too steep to walk on
+            return trace.endpos, normal
+        end
+    end
+
+    return to, nil
+end
+
+-- Usage in movement prediction
+local currentPos = player:GetAbsOrigin()
+local velocity = player:EstimateAbsVelocity()
+local nextPos = currentPos + velocity * 0.015 -- one tick ahead
+
+local hullMins = player:GetMins()
+local hullMaxs = player:GetMaxs()
+
+local actualPos, wallNormal = CheckWallCollision(currentPos, nextPos, hullMins, hullMaxs)
+if wallNormal then
+    -- Player will hit wall, adjust velocity
+    print("Wall collision detected")
+end
+```
+
+#### Ground check with hull
+
+```lua
+local function IsOnGround(player)
+    local pos = player:GetAbsOrigin()
+    local mins = player:GetMins()
+    local maxs = player:GetMaxs()
+
+    local groundCheck = engine.TraceHull(
+        pos,
+        pos + Vector3(0, 0, -2),
+        mins,
+        maxs,
+        MASK_PLAYERSOLID
+    )
+
+    if groundCheck.fraction < 1 then
+        local normal = groundCheck.plane
+        local angle = math.deg(math.acos(normal:Dot(Vector3(0, 0, 1))))
+        return angle < 45 -- Ground if slope < 45 degrees
+    end
+
+    return false
+end
+```
+
 ### Notes
 
 - **mins/maxs** define the hull box size relative to the trace line
 - Use **MASK_PLAYERSOLID** for movement/collision checks
 - Use **MASK_SHOT_HULL** for weapon hit detection
+- Use **MASK_PLAYERSOLID_BRUSHONLY** to ignore entities (walls only)
 - Hull traces are more expensive than line traces - use sparingly
+- **trace.plane** is the surface normal (Vector3, unit length)
+- Check plane angle with `math.acos(normal:Dot(up))` for walkability

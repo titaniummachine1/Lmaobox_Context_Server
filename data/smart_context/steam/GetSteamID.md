@@ -11,3 +11,4 @@ print("My SteamID: " .. myID)
 
 ### Notes
 - Returns SteamID3 string format
+

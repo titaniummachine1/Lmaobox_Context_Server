@@ -13,3 +13,4 @@ end
 
 ### Notes
 - Returns array of SteamID3 strings
+

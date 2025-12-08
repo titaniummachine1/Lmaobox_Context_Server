@@ -32,3 +32,4 @@ end
 ### Notes
 - Returns 0.0 if prop not found
 - Use exact table/field names from entity props
+

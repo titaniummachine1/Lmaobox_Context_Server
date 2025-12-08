@@ -11,3 +11,4 @@ local state = clientstate.GetClientSignonState()
 
 ### Notes
 - Use to check if client is fully connected before accessing entities
+

@@ -33,3 +33,4 @@ end
 ### Notes
 - Returns nil if prop is invalid or missing
 - Common handle props: `m_hActiveWeapon`, `m_hOwnerEntity`, `m_hHealingTarget`
+

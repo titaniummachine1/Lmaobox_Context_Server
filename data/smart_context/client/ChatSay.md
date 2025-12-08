@@ -10,3 +10,4 @@ client.ChatSay("Hello everyone")
 
 ### Notes
 - Use `ChatTeamSay` for team-only messages
+

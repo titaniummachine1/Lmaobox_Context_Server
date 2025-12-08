@@ -11,3 +11,4 @@ local me = entities.GetByIndex(myIdx)
 
 ### Notes
 - Alternative to `entities.GetLocalPlayer()`
+

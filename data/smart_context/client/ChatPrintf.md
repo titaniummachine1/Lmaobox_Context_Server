@@ -14,3 +14,4 @@ client.ChatPrintf("\x07FF0000Red text \x0700FF00Green text")
 ### Notes
 - Client-side only (not sent to server/other players)
 - Use for debugging/notifications
+

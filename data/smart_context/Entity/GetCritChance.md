@@ -15,3 +15,4 @@ end
 ### Notes
 - TF2 crit chance increases with recent damage
 - Returns 0-1 float
+

@@ -10,3 +10,4 @@ client.SetConVar("fov_desired", 90)
 
 ### Notes
 - Some convars are protected; use RemoveConVarProtection if needed
+

@@ -15,3 +15,4 @@ end
 
 ### Notes
 - Returns nil if not in a party
+

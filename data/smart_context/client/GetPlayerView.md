@@ -12,3 +12,4 @@ local view = client.GetPlayerView()
 
 ### Notes
 - Returns ViewSetup object; see ViewSetup class for fields
+

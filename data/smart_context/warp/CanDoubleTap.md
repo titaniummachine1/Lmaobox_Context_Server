@@ -18,3 +18,4 @@ end
 ### Notes
 - Requires sufficient charged ticks
 - Use for instant double-shot exploit
+

@@ -11,3 +11,4 @@ print("Tick interval: " .. ti .. " sec")
 
 ### Notes
 - Use for time conversions: ticks * TickInterval = seconds
+

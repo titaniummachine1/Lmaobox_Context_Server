@@ -20,3 +20,4 @@ end
 ### Notes
 - Returns nil if not a projectile weapon
 - Can return 0 if hardcoded; you must know defaults (e.g., rockets ~1100)
+

@@ -14,3 +14,4 @@ end
 ### Notes
 - Dormant entities should not be targeted or drawn
 - Common filter: `if ent and not ent:IsDormant() and ent:IsAlive()`
+

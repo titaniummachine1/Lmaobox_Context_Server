@@ -14,7 +14,7 @@
 ```lua
 local function PredictPosition(ent, dt)
     local pos = ent:GetAbsOrigin()
-    local vel = Entity:EstimateAbsVelocity()
+    local vel = ent:EstimateAbsVelocity()
     return pos + vel * dt
 end
 

@@ -13,3 +13,4 @@ end
 
 ### Notes
 - Requires charged ticks; use CanDoubleTap before calling
+

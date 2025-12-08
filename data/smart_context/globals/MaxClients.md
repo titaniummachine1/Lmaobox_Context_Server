@@ -11,3 +11,4 @@ print("Max players: " .. max)
 
 ### Notes
 - Typically 24 or 32 for TF2
+

@@ -14,3 +14,4 @@ end
 
 ### Notes
 - Returns WeaponData object; check WeaponData class for fields
+

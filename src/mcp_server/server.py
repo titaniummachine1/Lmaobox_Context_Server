@@ -230,7 +230,8 @@ def _search_library_partial_match(partial_symbol: str):
 
     for lib_file in search_base.glob("*.d.lua"):
         try:
-            text = lib_file.read_text(encoding=DEFAULT_ENCODING, errors="ignore")
+            text = lib_file.read_text(
+                encoding=DEFAULT_ENCODING, errors="ignore")
             lib_name = lib_file.stem  # e.g., "engine" from "engine.d.lua"
 
             # Look for function definitions: "function libname.FunctionName"
@@ -460,10 +461,16 @@ def get_types(symbol: str):
     # Limit to 10 total
     final_suggestions = all_suggestions[:10]
 
-    return {
+    response = {
         "did_you_mean": final_suggestions[0] if final_suggestions else None,
         "suggestions": final_suggestions
     }
+
+    # Add search hint if no exact match found
+    if final_suggestions:
+        response["hint"] = "💡 Tip: Search is case-insensitive. For partial name search, try variations. For browsing constants/types, check E_TraceLine, E_TFCOND, etc."
+
+    return response
 
 
 def _smart_context_candidates(symbol: str):
@@ -532,10 +539,16 @@ def get_smart_context(symbol: str):
     # Limit to 5 for smart context
     final_suggestions = all_suggestions[:5]
 
-    return {
+    response = {
         "did_you_mean": final_suggestions[0] if final_suggestions else None,
         "suggestions": final_suggestions
     }
+
+    # Add search hint
+    if final_suggestions:
+        response["hint"] = "💡 Search is case-insensitive. Try exact namespace: 'engine.TraceLine', 'Entity.GetHealth', 'custom.GetEyePos', etc."
+
+    return response
 
 
 class MCPRequestHandler(BaseHTTPRequestHandler):
