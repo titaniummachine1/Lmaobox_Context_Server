@@ -1,3 +1,4 @@
+# MCP Server - Updated with improved library search prioritization
 import json
 import logging
 import sqlite3
@@ -217,6 +218,38 @@ def _load_constants_group(symbol: str):
     }
 
 
+def _search_library_partial_match(partial_symbol: str):
+    """Search for partial matches in Library files (e.g., 'traceline' -> 'engine.TraceLine')."""
+    # Updated: Now properly searches all Library files for partial matches
+    search_base = TYPES_DIR / "lmaobox_lua_api" / "Lua_Libraries"
+    if not search_base.exists():
+        return []
+
+    matches = []
+    partial_lower = partial_symbol.lower()
+
+    for lib_file in search_base.glob("*.d.lua"):
+        try:
+            text = lib_file.read_text(encoding=DEFAULT_ENCODING, errors="ignore")
+            lib_name = lib_file.stem  # e.g., "engine" from "engine.d.lua"
+
+            # Look for function definitions: "function libname.FunctionName"
+            pattern = rf"function\s+{re.escape(lib_name)}\.(\w+)"
+            for line in text.splitlines():
+                if not line.strip().startswith("---"):  # Skip comments
+                    match = re.search(pattern, line)
+                    if match:
+                        func_name = match.group(1)
+                        if partial_lower in func_name.lower():
+                            full_name = f"{lib_name}.{func_name}"
+                            if full_name not in matches:
+                                matches.append(full_name)
+        except Exception:
+            continue
+
+    return matches
+
+
 def _scan_types_for_symbol(symbol: str):
     """Fallback scanner that looks through generated type files for a quick signature hint."""
     short_symbol = symbol.split(".")[-1]
@@ -272,7 +305,7 @@ def _scan_types_for_symbol(symbol: str):
 
 
 def _suggest_symbols(conn: sqlite3.Connection, symbol: str, limit: int = 10):
-    """Return fuzzy symbol suggestions from the symbols table."""
+    """Return fuzzy symbol suggestions, prioritizing Libraries over Classes."""
     try:
         # Check if symbols table exists
         cursor = conn.execute(
@@ -286,30 +319,82 @@ def _suggest_symbols(conn: sqlite3.Connection, symbol: str, limit: int = 10):
         if not candidates:
             return []
 
-        ranked = difflib.get_close_matches(
-            symbol, candidates, n=limit * 4, cutoff=0
-        )
-        # Deduplicate and prefer callable-like names (with a dot). If we have
-        # too few, backfill with remaining ranked items to reach at least 5.
-        seen = set()
-        with_dot: list[str] = []
-        extras: list[str] = []
-        for name in ranked:
-            if name in seen:
-                continue
-            seen.add(name)
-            if "." in name:
-                if len(with_dot) < limit:
-                    with_dot.append(name)
+        # Separate candidates by category
+        library_funcs: list[str] = []
+        class_props: list[str] = []
+        constants: list[str] = []
+        other: list[str] = []
+
+        # All known library namespaces from Lua_Libraries folder
+        library_namespaces = {
+            "aimbot", "callbacks", "client", "clientstate", "draw", "engine",
+            "entities", "filesystem", "gamecoordinator", "gamerules", "globals",
+            "gui", "http", "input", "inventory", "itemschema", "materials",
+            "models", "party", "physics", "playerlist", "render", "steam",
+            "vector", "warp"
+        }
+
+        for name in candidates:
+            if name.startswith("E_") or name.isupper():
+                constants.append(name)
+            elif "." in name:
+                # Check if it's from a Library or Class by looking at the namespace
+                namespace = name.split(".")[0].lower()
+                if namespace in library_namespaces:
+                    library_funcs.append(name)
+                else:
+                    # Likely a class property (e.g., Entity.GetPropInt, Trace.plane)
+                    class_props.append(name)
             else:
-                extras.append(name)
-        min_needed = 5
-        if len(with_dot) < min_needed:
-            for name in extras:
-                if len(with_dot) >= min(limit, min_needed):
-                    break
-                with_dot.append(name)
-        return with_dot[:limit]
+                other.append(name)
+
+        # Fuzzy match within each category
+        ranked_libs = difflib.get_close_matches(
+            symbol, library_funcs, n=limit * 2, cutoff=0.3)
+        ranked_classes = difflib.get_close_matches(
+            symbol, class_props, n=limit * 2, cutoff=0.3)
+        ranked_constants = difflib.get_close_matches(
+            symbol, constants, n=limit, cutoff=0.4)
+        ranked_other = difflib.get_close_matches(
+            symbol, other, n=limit, cutoff=0.4)
+
+        # Prioritize: Libraries > Classes > Constants > Other
+        result = []
+        seen = set()
+
+        # Add library functions first (highest priority)
+        for name in ranked_libs:
+            if name not in seen:
+                result.append(name)
+                seen.add(name)
+                if len(result) >= limit:
+                    return result
+
+        # Then add class properties
+        for name in ranked_classes:
+            if name not in seen:
+                result.append(name)
+                seen.add(name)
+                if len(result) >= limit:
+                    return result
+
+        # Then constants
+        for name in ranked_constants:
+            if name not in seen:
+                result.append(name)
+                seen.add(name)
+                if len(result) >= limit:
+                    return result
+
+        # Finally other symbols
+        for name in ranked_other:
+            if name not in seen:
+                result.append(name)
+                seen.add(name)
+                if len(result) >= limit:
+                    return result
+
+        return result
     except Exception:
         return []
 
@@ -356,11 +441,28 @@ def get_types(symbol: str):
         response.pop("source", None)  # not needed for the model
         return response
 
-    # Not found: include fuzzy suggestions to help correction
-    suggestions = _suggest_symbols(conn, symbol, limit=10)
+    # Not found: try partial library search if no dots in symbol
+    library_matches = []
+    if "." not in symbol:
+        library_matches = _search_library_partial_match(symbol)
+
+    # Get fuzzy suggestions from database
+    db_suggestions = _suggest_symbols(conn, symbol, limit=10)
+
+    # Combine: library matches first, then db suggestions (avoiding duplicates)
+    all_suggestions = library_matches[:]
+    seen = set(all_suggestions)
+    for sugg in db_suggestions:
+        if sugg not in seen:
+            all_suggestions.append(sugg)
+            seen.add(sugg)
+
+    # Limit to 10 total
+    final_suggestions = all_suggestions[:10]
+
     return {
-        "did_you_mean": suggestions[0] if suggestions else None,
-        "suggestions": suggestions
+        "did_you_mean": final_suggestions[0] if final_suggestions else None,
+        "suggestions": final_suggestions
     }
 
 
@@ -405,18 +507,34 @@ def get_smart_context(symbol: str):
         except Exception:
             pass  # fall through to suggestions
 
-    # No direct hit: return suggestions from symbols to guide the caller
+    # No direct hit: try partial library search if no dots in symbol
+    library_matches = []
+    if "." not in symbol:
+        library_matches = _search_library_partial_match(symbol)
+
+    # Get fuzzy suggestions from database
     try:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
-        suggestions = _suggest_symbols(conn, symbol, limit=5)
+        db_suggestions = _suggest_symbols(conn, symbol, limit=5)
         conn.close()
     except Exception:
-        suggestions = []
+        db_suggestions = []
+
+    # Combine: library matches first, then db suggestions (avoiding duplicates)
+    all_suggestions = library_matches[:]
+    seen = set(all_suggestions)
+    for sugg in db_suggestions:
+        if sugg not in seen:
+            all_suggestions.append(sugg)
+            seen.add(sugg)
+
+    # Limit to 5 for smart context
+    final_suggestions = all_suggestions[:5]
 
     return {
-        "did_you_mean": suggestions[0] if suggestions else None,
-        "suggestions": suggestions
+        "did_you_mean": final_suggestions[0] if final_suggestions else None,
+        "suggestions": final_suggestions
     }
 
 
