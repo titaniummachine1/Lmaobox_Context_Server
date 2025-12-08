@@ -4,11 +4,10 @@ Single-purpose MCP server for serving Lmaobox Lua API context, generated types, 
 
 ## What’s here
 
-- **MCP server** (`src/mcp_server/server.py`): endpoints for `/health`, `/get_types`, and `/smart_context`.
-- **Smart context store** (`data/smart_context/`): curated `.md` files per symbol (API or custom helpers). Nearest-definition lookup with fuzzy fallback.
-- **Generated types** (`types/lmaobox_lua_api/`): fast type/signature lookup and fallback source when the DB is empty.
-- **Processing zones** (`processing_zone/01_TO_PROCESS`, `02_IN_PROGRESS`, `03_DONE` + `RAW_NOTES/`): staging for mining/consolidation workflows.
-- **Crawler** (`automations/crawler/`): existing JS crawler and type generator. Keep this intact; bundler artifacts were removed.
+- **MCP server** (`src/mcp_server/`): stdio and HTTP server for `get_types` and `get_smart_context`.
+- **Smart context store** (`data/smart_context/`): curated `.md` files per symbol (API or custom helpers).
+- **Generated types** (`types/lmaobox_lua_api/`): Lua type definitions for API, constants, classes, entity props.
+- **Crawler** (`automations/crawler/`): JS crawler and type generator. Run `node automations/refresh-docs.js` to update.
 
 ## Running the MCP server
 
@@ -18,9 +17,21 @@ The server supports the MCP (Model Context Protocol) stdio interface for integra
 
 **Quick Setup:**
 
-1. See `MCP_SETUP.md` for detailed configuration instructions
-2. Add the server to your Cursor/Claude Desktop MCP config
-3. Restart Cursor/Claude Desktop to load the server
+1. Add to Cursor/Claude Desktop MCP config:
+
+```json
+{
+  "mcpServers": {
+    "lmaobox-context": {
+      "command": "python",
+      "args": ["C:/path/to/Lmaobox_Context_Server/launch_mcp.py"],
+      "cwd": "C:/path/to/Lmaobox_Context_Server"
+    }
+  }
+}
+```
+
+2. Restart Cursor/Claude Desktop to load the server
 
 **Manual test:**
 
@@ -98,8 +109,10 @@ end
 - Crawler entrypoint: `node automations/refresh-docs.js` (see `automations/README.md`).
 - Keep `types/` and `Lmaobox-Annotations-master/`—they seed fast lookups for `get_types`.
 
-## Housekeeping
-- `.gitignore` excludes caches, build outputs, and processing churn; `.gitkeep` pins empty staging folders.
-- Removed legacy bundler scripts and node_modules to keep the repo focused on MCP, crawler, and types.
+## Utility Scripts
 
+- `scripts/mcp_insert_custom.py` - Insert custom smart context into the database
+- `scripts/query_examples.py` - Query and test MCP tools
+- `scripts/restart-mcp.ps1`, `run-mcp.ps1`, `start_mcp.bat` - Server control scripts
+- `scripts/test-get-types.ps1` - Test the get_types endpoint
 ```
