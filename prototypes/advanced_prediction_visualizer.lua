@@ -72,7 +72,7 @@ local function CalculateWishDir(cmd)
 	return Vector3(math.cos(worldAngle), math.sin(worldAngle), 0)
 end
 
--- Wishdir tracking (stores actual wishdir vectors)
+-- Wishdir tracking (relative to lookdir coordinate system)
 local currentWishdirVector = {}    -- Current wishdir vector per player
 local lastWishdirIndex = {}
 local wishdirChangeHistory = {}    -- Stores last 33 changes: {ticksSinceLastChange, directionDelta}
@@ -244,10 +244,10 @@ local function UpdateTracking(entity, cmd)
 	end
 
 	if currentYaw then
-		-- Simple EMA smoothing (0.8 * old + 0.2 * new)
+		-- Use immediate yaw change (no EMA lag for responsive prediction)
 		if lastYaw[idx] then
 			local yawDelta = NormalizeAngle(currentYaw - lastYaw[idx])
-			yawRates[idx] = (yawRates[idx] or 0) * 0.8 + yawDelta * 0.2
+			yawRates[idx] = yawDelta -- Use immediate change instead of smoothing
 		else
 			yawRates[idx] = 0
 		end
@@ -279,6 +279,9 @@ local function UpdateTracking(entity, cmd)
 
 			-- Normalize to shortest path in 8-direction space (-4 to 4)
 			dirDelta = ((dirDelta + 4) % 8) - 4
+
+			-- DEBUG: Print observed change magnitude and rate
+			print(string.format("[WISHDIR] Entity %d: delta=%d, ticks=%d", idx, dirDelta, wishdirTicksSinceChange[idx]))
 
 			-- EMA track update rate (ticks) and step magnitude/direction
 			local alpha = 0.2
@@ -623,27 +626,43 @@ local function PredictPath(player, ticks, wishdir)
 	local yawRotationPerTick = yawRates[index] or 0
 
 	-- Wishdir prediction setup
-	local currentWishdirIndex
+	local currentWishdirIndex = 0 -- Relative wishdir index (0-7) in lookdir reference frame
+	local wishdirRelativeAngle = 0 -- Offset from view direction for local player
 	local wishdirChangeMagnitude = 0 -- Average direction delta (in 8-state space)
 	local wishdirUpdateRate = 999 -- Average ticks between changes (binary update rate)
-	local wishdirRelativeAngle = 0 -- For local player: offset from view direction
 
 	if wishdir then
 		-- Local player: calculate wishdir as OFFSET from current view direction
-		-- This offset stays constant, wishdir inherits all view rotation automatically
 		wishdirRelativeAngle = GetWishdirRelativeAngle(wishdir, currentYaw)
+		currentWishdirIndex = math.floor((wishdirRelativeAngle + 22.5) / 45) % 8
 	else
-		-- Enemies: predict from change history (use ALL 33 history entries)
-		local initialWishdirIndex = lastWishdirIndex[index] or 0
-		-- Convert initial index to relative angle for dynamic changes
-		wishdirRelativeAngle = (initialWishdirIndex * 45) % 360 -- Convert to degrees relative to view
+		-- Enemies: predict from change history (relative to lookdir)
+		currentWishdirIndex = lastWishdirIndex[index] or 0 -- Start from last known index
 
-		-- Prefer EMA (yaw-style). Fallback to history if not enough samples.
-		wishdirChangeMagnitude = wishdirStepEma[index]
-		wishdirUpdateRate = wishdirUpdateRateEma[index]
-		if not wishdirChangeMagnitude or not wishdirUpdateRate then
-			wishdirChangeMagnitude, wishdirUpdateRate = AnalyzeWishdirPattern(index)
+		-- Use EMA for average change patterns, but with higher responsiveness
+		local emaStep = wishdirStepEma[index]
+		local emaRate = wishdirUpdateRateEma[index]
+
+		-- Fallback to history analysis if EMA not available
+		if not emaStep or not emaRate then
+			emaStep, emaRate = AnalyzeWishdirPattern(index)
 		end
+
+		-- Use more responsive EMA (higher alpha = less smoothing)
+		local alpha = 0.5 -- More responsive than 0.2
+		if wishdirLastStep[index] then
+			emaStep = emaStep and (emaStep * (1 - alpha) + wishdirLastStep[index] * alpha) or wishdirLastStep[index]
+		end
+		if wishdirTicksSinceChange[index] then
+			emaRate = emaRate and (emaRate * (1 - alpha) + wishdirTicksSinceChange[index] * alpha) or
+			wishdirTicksSinceChange[index]
+		end
+
+		wishdirChangeMagnitude = RoundWishdirDelta(emaStep or 1)
+		wishdirUpdateRate = math.max(2, math.floor(emaRate or 8)) -- Min 2 ticks, use observed rate
+
+		-- DEBUG: Print prediction values being used
+		print(string.format("[PREDICT] Entity %d: step=%d, rate=%d", index, wishdirChangeMagnitude, wishdirUpdateRate))
 	end
 
 	-- Snap inputs for simulation
@@ -663,14 +682,13 @@ local function PredictPath(player, ticks, wishdir)
 		-- Step 1: Update yaw (ALWAYS - for everyone, like strafe tracking)
 		currentYaw = currentYaw + yawRotationPerTick
 
-		-- Step 2: Calculate current wishdir (inherits view rotation)
+		-- Step 2: Calculate current wishdir (relative to lookdir)
 		local currentWishdir
 		if wishdir then
-			-- Local player: wishdir is OFFSET from view direction
-			-- Automatically rotates with yaw (foolproof, no error accumulation)
+			-- Local player: wishdir rotates with view direction automatically
 			currentWishdir = ApplyWishdirOffset(currentYaw, wishdirRelativeAngle)
 		else
-			-- Enemies: predict wishdir changes based on tracked pattern
+			-- Enemies: predict wishdir changes in relative coordinate system
 			ticksSinceWishdirChange = ticksSinceWishdirChange + 1
 
 			-- Check if it's time to change direction (binary update rate)
@@ -685,19 +703,23 @@ local function PredictPath(player, ticks, wishdir)
 					step = wishdirChangeHistory[index][1].delta
 				end
 
-				-- Only apply significant changes (1, -1, 3, -3 as mentioned)
-				local validSteps = { [-3] = true, [-1] = true, [1] = true, [3] = true }
-				if step ~= 0 and validSteps[step] then
-					-- Convert step to angle delta (45 degrees per step in 8-direction space)
-					local angleDelta = step * 45
-					wishdirRelativeAngle = wishdirRelativeAngle + angleDelta
+				-- Apply the observed step (we observe various deltas: 1, 2, 3, -4, etc.)
+				if step ~= 0 then
+					-- DEBUG: Print applied change
+					print(string.format("[SIM] Entity %d: applying step=%d, index before=%d", index, step,
+						currentWishdirIndex))
+
+					-- Apply direction change in relative coordinate system
+					currentWishdirIndex = (currentWishdirIndex + step) % 8
 					lastStep = step
+
+					print(string.format("[SIM] Entity %d: index after=%d", index, currentWishdirIndex))
 				end
 				ticksSinceWishdirChange = 0
 			end
 
-			-- Apply relative angle to current view direction to get world-space wishdir
-			currentWishdir = ApplyWishdirOffset(currentYaw, wishdirRelativeAngle)
+			-- Convert relative index to world-space wishdir (automatically rotates with lookdir)
+			currentWishdir = IndexToWishDir(currentWishdirIndex, currentYaw)
 		end
 
 		-- Step 3: Physics simulation
@@ -744,9 +766,9 @@ local function OnDraw()
 		end
 	end
 
-	-- Predict path using actual tracked wishdir (accurate for local player)
-	local myWishdir = currentWishdirVector[me:GetIndex()]
-	local path = PredictPath(me, PREDICT_TICKS, myWishdir)
+	-- Predict path using tracked wishdir patterns (for local player)
+	-- Use nil wishdir to trigger pattern prediction instead of current input
+	local path = PredictPath(me, PREDICT_TICKS, nil)
 	if not path then
 		return
 	end
