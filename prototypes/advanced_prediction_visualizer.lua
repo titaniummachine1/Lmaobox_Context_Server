@@ -51,31 +51,30 @@ local airAccelerate = sv_airaccelerate or 10
 local function CalculateWishDir(cmd)
 	local fwd = cmd:GetForwardMove()
 	local side = cmd:GetSideMove()
-	
+
 	-- Ignore minimal movements
 	if math.abs(fwd) < 5 and math.abs(side) < 5 then
 		return nil
 	end
-	
+
 	-- Get view yaw
 	local _, yaw = cmd:GetViewAngles()
-	
+
 	-- Calculate angle from forward/side (NOTE: sidemove is inverted in TF2!)
 	local moveAngle = math.atan(-side, fwd) * (180 / math.pi)
-	
+
 	-- Convert to world space
 	local worldAngle = (yaw + moveAngle) * (math.pi / 180)
-	
+
 	-- Return normalized wishdir vector
 	return Vector3(math.cos(worldAngle), math.sin(worldAngle), 0)
 end
 
 -- Wishdir tracking (stores actual wishdir vectors)
-local currentWishdirVector = {}    -- Current wishdir vector per player
+local currentWishdirVector = {} -- Current wishdir vector per player
 local lastWishdirIndex = {}
-local wishdirChangeHistory = {}    -- Stores recent changes (+1, -1, +4, -4, etc.)
+local wishdirChangeHistory = {} -- Stores recent changes (+1, -1, +4, -4, etc.)
 local WISHDIR_HISTORY_SIZE = 33
-local WISHDIR_MIN_CHANGE_TICKS = 7 -- Minimum ticks between wishdir changes
 
 -- Pattern types
 local PATTERN_NONE = 0
@@ -574,8 +573,8 @@ local function PredictPath(player, ticks, wishdir)
 			historyRotation = sum / math.min(5, #history)
 		end
 
-		-- For enemies: use wishdir history only (yaw is known, not predicted)
-		wishdirRotation = historyRotation / WISHDIR_MIN_CHANGE_TICKS
+		-- For enemies: use wishdir history directly (no rate limiting!)
+		wishdirRotation = historyRotation
 	end
 
 	path[0] = Vector3(origin.x, origin.y, origin.z)
