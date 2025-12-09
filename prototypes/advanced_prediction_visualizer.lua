@@ -72,15 +72,221 @@ local function CalculateWishDir(cmd)
 	return Vector3(math.cos(worldAngle), math.sin(worldAngle), 0)
 end
 
--- Wishdir tracking (relative to lookdir coordinate system)
-local currentWishdirVector = {}    -- Current wishdir vector per player
+-- Markov-based wishdir tracking (relative to lookdir coordinate system)
+local currentWishdirVector = {} -- Current wishdir vector per player
 local lastWishdirIndex = {}
-local wishdirChangeHistory = {}    -- Stores last 33 changes: {ticksSinceLastChange, directionDelta}
-local wishdirTicksSinceChange = {} -- Counter for ticks since last wishdir change
-local wishdirUpdateRateEma = {}    -- EMA of ticks between wishdir changes
-local wishdirStepEma = {}          -- EMA of wishdir delta (signed steps)
-local wishdirLastStep = {}         -- Last non-zero step observed (signed)
-local WISHDIR_HISTORY_SIZE = 66
+local wishdirTicksSinceChange = wishdirTicksSinceChange or {}
+local wishdirUpdateRateEma = wishdirUpdateRateEma or {}
+
+-- Legacy compatibility (older globals may reference these)
+local wishdirStepEma = wishdirStepEma or {}
+local wishdirLastStep = wishdirLastStep or {}
+local wishdirChangeHistory = wishdirChangeHistory or {}
+local WISHDIR_HISTORY_SIZE = WISHDIR_HISTORY_SIZE or 33
+
+-- Markov transition tables: markov[entityIndex][context][nextDir] = count
+-- context = string of recent direction indices (e.g. "0,1,2" for last 3 directions)
+local markovTables = {}
+local MARKOV_MAX_ORDER = 3   -- Maximum context length (1-3 directions)
+local MARKOV_MIN_SAMPLES = 5 -- Minimum samples before using Markov
+
+-- Recent direction history for building contexts
+local recentDirections = {}    -- entityIndex -> ring buffer of last N directions
+local RECENT_HISTORY_SIZE = 16 -- Keep last 16 inputs for entropy + contexts
+
+-- Entropy tracking for prediction gating
+local directionEntropy = {}    -- entityIndex -> current entropy value
+local ENTROPY_WINDOW_SIZE = 16 -- Calculate entropy over last 16 inputs
+local ENTROPY_THRESHOLD = 2.5  -- Max entropy before disabling prediction (8 dirs max ~3.0)
+
+-- Delta-space tracking for rotation detection
+local deltaHistory = {}       -- entityIndex -> ring buffer of recent direction deltas
+local DELTA_HISTORY_SIZE = 12 -- Keep last 12 deltas for rotation detection
+
+-- Timing model: separate from direction transitions
+local timingModel = {} -- entityIndex -> {ticksHeld: count} for timing patterns
+
+local LOG2 = math.log(2)
+
+local function CalculateEntropyFromHistory(history)
+	if not history or #history == 0 then
+		return 0
+	end
+
+	local counts = {}
+	local samples = 0
+	local startIdx = math.max(1, #history - ENTROPY_WINDOW_SIZE + 1)
+
+	for i = startIdx, #history do
+		local dir = history[i]
+		counts[dir] = (counts[dir] or 0) + 1
+		samples = samples + 1
+	end
+
+	local entropy = 0
+	for _, count in pairs(counts) do
+		local p = count / samples
+		entropy = entropy - p * (math.log(p) / LOG2)
+	end
+
+	return entropy
+end
+
+local function PushRecentDirection(idx, dirIndex)
+	if dirIndex == nil then
+		return
+	end
+
+	if not recentDirections[idx] then
+		recentDirections[idx] = {}
+	end
+
+	local history = recentDirections[idx]
+	history[#history + 1] = dirIndex
+
+	if #history > RECENT_HISTORY_SIZE then
+		table.remove(history, 1)
+	end
+
+	directionEntropy[idx] = CalculateEntropyFromHistory(history)
+end
+
+local function PushDelta(idx, delta)
+	if not deltaHistory[idx] then
+		deltaHistory[idx] = {}
+	end
+
+	local history = deltaHistory[idx]
+	history[#history + 1] = delta
+
+	if #history > DELTA_HISTORY_SIZE then
+		table.remove(history, 1)
+	end
+end
+
+local function IsRotating(idx)
+	local hist = deltaHistory[idx]
+	if not hist or #hist < 5 then
+		return nil
+	end
+
+	local sum = 0
+	for _, d in ipairs(hist) do
+		sum = sum + d
+	end
+	local avg = sum / #hist
+
+	-- Require consistent direction with minimum magnitude
+	if math.abs(avg) >= 0.75 then
+		return avg > 0 and 1 or -1
+	end
+
+	return nil
+end
+
+local function RecordMarkovTransition(idx, nextDir)
+	if nextDir == nil then
+		return
+	end
+
+	local history = recentDirections[idx]
+	if not history or #history == 0 then
+		return
+	end
+
+	if not markovTables[idx] then
+		markovTables[idx] = { _global = { total = 0, counts = {} } }
+	elseif not markovTables[idx]._global then
+		markovTables[idx]._global = { total = 0, counts = {} }
+	end
+
+	local tables = markovTables[idx]
+
+	for order = 1, MARKOV_MAX_ORDER do
+		if #history < order then
+			break
+		end
+
+		local ctxParts = {}
+		for i = (#history - order + 1), #history do
+			ctxParts[#ctxParts + 1] = history[i]
+		end
+
+		local contextKey = table.concat(ctxParts, ",")
+		local bucket = tables[contextKey]
+
+		if not bucket then
+			bucket = { total = 0, counts = {} }
+			tables[contextKey] = bucket
+		end
+
+		bucket.total = bucket.total + 1
+		bucket.counts[nextDir] = (bucket.counts[nextDir] or 0) + 1
+	end
+
+	local global = tables._global
+	global.total = global.total + 1
+	global.counts[nextDir] = (global.counts[nextDir] or 0) + 1
+end
+
+local function PredictNextDirection(idx, contextHistory)
+	local entropy = directionEntropy[idx]
+	if entropy and entropy > ENTROPY_THRESHOLD then
+		return nil, 0
+	end
+
+	local tables = markovTables[idx]
+	local history = contextHistory or recentDirections[idx]
+
+	if not tables or not history or #history == 0 then
+		return nil, 0
+	end
+
+	for order = MARKOV_MAX_ORDER, 1, -1 do
+		if #history >= order then
+			local ctxParts = {}
+			for i = (#history - order + 1), #history do
+				ctxParts[#ctxParts + 1] = history[i]
+			end
+
+			local contextKey = table.concat(ctxParts, ",")
+			local bucket = tables[contextKey]
+
+			if bucket and bucket.total >= MARKOV_MIN_SAMPLES then
+				local bestDir, bestCount = nil, -1
+
+				for dir, count in pairs(bucket.counts) do
+					if count > bestCount then
+						bestDir = dir
+						bestCount = count
+					end
+				end
+
+				if bestDir then
+					return bestDir, bestCount / bucket.total
+				end
+			end
+		end
+	end
+
+	local global = tables._global
+	if global and global.total >= MARKOV_MIN_SAMPLES then
+		local bestDir, bestCount = nil, -1
+
+		for dir, count in pairs(global.counts) do
+			if count > bestCount then
+				bestDir = dir
+				bestCount = count
+			end
+		end
+
+		if bestDir then
+			return bestDir, bestCount / global.total
+		end
+	end
+
+	return nil, 0
+end
 
 -- Normalize angle to -180 to 180
 local function NormalizeAngle(angle)
@@ -193,32 +399,6 @@ local function GetWishdirIndexFromVelocity(velocity, viewYaw)
 	return dirIndex
 end
 
--- Analyze wishdir pattern from change history (EMA over last 66 entries)
--- Returns: avgMagnitude (direction delta), avgUpdateRate (ticks between changes)
-local function AnalyzeWishdirPattern(idx)
-	local history = wishdirChangeHistory[idx]
-	if not history or #history < 2 then
-		return 0, 999 -- Default: no change, never update
-	end
-
-	-- EMA smoothing (like yaw): alpha = 0.2, iterate oldest -> newest
-	local alpha = 0.2
-	local emaTicks = history[#history].ticks
-	local emaMag = history[#history].delta
-
-	for i = #history - 1, 1, -1 do
-		emaTicks = emaTicks * (1 - alpha) + history[i].ticks * alpha
-		emaMag = emaMag * (1 - alpha) + history[i].delta * alpha
-	end
-
-	local avgUpdateRate = math.max(1, emaTicks) -- Avoid zero / instant change
-
-	-- Discrete magnitude: snap to allowed steps
-	local avgMagnitude = RoundWishdirDelta(emaMag)
-
-	return avgMagnitude, avgUpdateRate
-end
-
 local function UpdateTracking(entity, cmd)
 	if not entity then return end
 
@@ -268,50 +448,47 @@ local function UpdateTracking(entity, cmd)
 		if not wishdirTicksSinceChange[idx] then
 			wishdirTicksSinceChange[idx] = 0
 		end
-
 		-- Increment tick counter
 		wishdirTicksSinceChange[idx] = wishdirTicksSinceChange[idx] + 1
 
-		-- Check if direction changed
-		if lastWishdirIndex[idx] and currentWishdirIndex ~= lastWishdirIndex[idx] then
-			-- Direction changed! Calculate delta and store change
-			local dirDelta = currentWishdirIndex - lastWishdirIndex[idx]
-
-			-- Normalize to shortest path in 8-direction space (-4 to 4)
-			dirDelta = ((dirDelta + 4) % 8) - 4
-
-			-- DEBUG: Print observed change magnitude and rate
-			print(string.format("[WISHDIR] Entity %d: delta=%d, ticks=%d", idx, dirDelta, wishdirTicksSinceChange[idx]))
-
-			-- EMA track update rate (ticks) and step magnitude/direction
-			local alpha = 0.2
-			local prevRate = wishdirUpdateRateEma[idx]
-			local prevStep = wishdirStepEma[idx]
-			wishdirUpdateRateEma[idx] = prevRate and (prevRate * (1 - alpha) + wishdirTicksSinceChange[idx] * alpha)
-				or wishdirTicksSinceChange[idx]
-			wishdirStepEma[idx] = prevStep and (prevStep * (1 - alpha) + dirDelta * alpha) or dirDelta
-			wishdirLastStep[idx] = dirDelta
-
-			-- Store change: {ticks since last change, direction delta}
-			if not wishdirChangeHistory[idx] then
-				wishdirChangeHistory[idx] = {}
-			end
-
-			table.insert(wishdirChangeHistory[idx], 1, {
-				ticks = wishdirTicksSinceChange[idx],
-				delta = dirDelta
-			})
-
-			-- Keep only last 33 entries
-			while #wishdirChangeHistory[idx] > WISHDIR_HISTORY_SIZE do
-				table.remove(wishdirChangeHistory[idx])
-			end
-
-			-- Reset tick counter
+		-- First observation: seed history and timers
+		if not lastWishdirIndex[idx] then
+			lastWishdirIndex[idx] = currentWishdirIndex
 			wishdirTicksSinceChange[idx] = 0
+			PushRecentDirection(idx, currentWishdirIndex)
+			return
 		end
 
-		lastWishdirIndex[idx] = currentWishdirIndex
+		-- Direction change detected
+		if currentWishdirIndex ~= lastWishdirIndex[idx] then
+			local ticksHeld = wishdirTicksSinceChange[idx]
+
+			-- Update timing model (EMA of ticks held)
+			local alpha = 0.2
+			local prevRate = wishdirUpdateRateEma[idx]
+			wishdirUpdateRateEma[idx] = prevRate and (prevRate * (1 - alpha) + ticksHeld * alpha) or ticksHeld
+
+			-- Update Markov transitions and entropy
+			RecordMarkovTransition(idx, currentWishdirIndex)
+			PushRecentDirection(idx, currentWishdirIndex)
+
+			-- Record delta for rotation detection
+			local delta = (currentWishdirIndex - lastWishdirIndex[idx]) % 8
+			if delta > 4 then delta = delta - 8 end -- normalize to [-4,4]
+			PushDelta(idx, delta)
+
+			-- Optional: raw timing histogram
+			if ticksHeld and ticksHeld > 0 then
+				if not timingModel[idx] then
+					timingModel[idx] = {}
+				end
+				timingModel[idx][ticksHeld] = (timingModel[idx][ticksHeld] or 0) + 1
+			end
+
+			-- Reset counters for next segment
+			wishdirTicksSinceChange[idx] = 0
+			lastWishdirIndex[idx] = currentWishdirIndex
+		end
 	end
 end
 
@@ -628,47 +805,30 @@ local function PredictPath(player, ticks, wishdir)
 	-- Wishdir prediction setup
 	local currentWishdirIndex = 0 -- Relative wishdir index (0-7) in lookdir reference frame
 	local wishdirRelativeAngle = 0 -- Offset from view direction for local player
-	local wishdirChangeMagnitude = 0 -- Average direction delta (in 8-state space)
 	local wishdirUpdateRate = 999 -- Average ticks between changes (binary update rate)
+	local simulatedHistory
 
 	if wishdir then
 		-- Local player: calculate wishdir as OFFSET from current view direction
 		wishdirRelativeAngle = GetWishdirRelativeAngle(wishdir, currentYaw)
 		currentWishdirIndex = math.floor((wishdirRelativeAngle + 22.5) / 45) % 8
 	else
-		-- Enemies: predict from change history (relative to lookdir)
-		currentWishdirIndex = lastWishdirIndex[index] or 0 -- Start from last known index
+		-- Enemies: predict from Markov history (relative to lookdir)
+		currentWishdirIndex = lastWishdirIndex[index] or 0                      -- Start from last known index
+		wishdirUpdateRate = math.max(2, math.floor(wishdirUpdateRateEma[index] or 8)) -- Min 2 ticks, use observed rate
 
-		-- Use EMA for average change patterns, but with higher responsiveness
-		local emaStep = wishdirStepEma[index]
-		local emaRate = wishdirUpdateRateEma[index]
+		if recentDirections[index] then
+			simulatedHistory = {}
+			local sourceHistory = recentDirections[index]
+			local startIdx = math.max(1, #sourceHistory - RECENT_HISTORY_SIZE + 1)
 
-		-- Fallback to history analysis if EMA not available
-		if not emaStep or not emaRate then
-			emaStep, emaRate = AnalyzeWishdirPattern(index)
+			for i = startIdx, #sourceHistory do
+				simulatedHistory[#simulatedHistory + 1] = sourceHistory[i]
+			end
 		end
-
-		-- Use more responsive EMA (higher alpha = less smoothing)
-		local alpha = 0.5 -- More responsive than 0.2
-		if wishdirLastStep[index] then
-			emaStep = emaStep and (emaStep * (1 - alpha) + wishdirLastStep[index] * alpha) or wishdirLastStep[index]
-		end
-		if wishdirTicksSinceChange[index] then
-			emaRate = emaRate and (emaRate * (1 - alpha) + wishdirTicksSinceChange[index] * alpha) or
-			wishdirTicksSinceChange[index]
-		end
-
-		wishdirChangeMagnitude = RoundWishdirDelta(emaStep or 1)
-		wishdirUpdateRate = math.max(2, math.floor(emaRate or 8)) -- Min 2 ticks, use observed rate
-
-		-- DEBUG: Print prediction values being used
-		print(string.format("[PREDICT] Entity %d: step=%d, rate=%d", index, wishdirChangeMagnitude, wishdirUpdateRate))
 	end
 
-	-- Snap inputs for simulation
-	wishdirChangeMagnitude = RoundWishdirDelta(wishdirChangeMagnitude or 0)
 	wishdirUpdateRate = math.max(1, wishdirUpdateRate or 999)
-	local lastStep = RoundWishdirDelta(wishdirLastStep[index] or 0)
 
 	path[0] = Vector3(origin.x, origin.y, origin.z)
 
@@ -693,28 +853,32 @@ local function PredictPath(player, ticks, wishdir)
 
 			-- Check if it's time to change direction (binary update rate)
 			if ticksSinceWishdirChange >= wishdirUpdateRate then
-				-- Get the change magnitude (should be 1, -1, 3, -3 for meaningful direction changes)
-				local step = wishdirChangeMagnitude
-				if step == 0 then
-					-- Fallback to last observed non-zero step
-					step = lastStep
-				end
-				if step == 0 and wishdirChangeHistory[index] and wishdirChangeHistory[index][1] then
-					step = wishdirChangeHistory[index][1].delta
+				local predictedDir
+
+				-- First priority: continuous rotation detection
+				local rot = IsRotating(index)
+				if rot then
+					-- Apply continuous rotation: dir_t+1 = dir_t + ω
+					predictedDir = (currentWishdirIndex + rot) % 8
+				else
+					-- Fallback to Markov for discrete patterns
+					predictedDir = PredictNextDirection(index, simulatedHistory)
 				end
 
-				-- Apply the observed step (we observe various deltas: 1, 2, 3, -4, etc.)
-				if step ~= 0 then
-					-- DEBUG: Print applied change
-					print(string.format("[SIM] Entity %d: applying step=%d, index before=%d", index, step,
-						currentWishdirIndex))
+				if predictedDir then
+					currentWishdirIndex = predictedDir
 
-					-- Apply direction change in relative coordinate system
-					currentWishdirIndex = (currentWishdirIndex + step) % 8
-					lastStep = step
-
-					print(string.format("[SIM] Entity %d: index after=%d", index, currentWishdirIndex))
+					-- Evolve simulated history for multi-step forecasts
+					if simulatedHistory then
+						simulatedHistory[#simulatedHistory + 1] = predictedDir
+						if #simulatedHistory > RECENT_HISTORY_SIZE then
+							table.remove(simulatedHistory, 1)
+						end
+					else
+						simulatedHistory = { predictedDir }
+					end
 				end
+
 				ticksSinceWishdirChange = 0
 			end
 
