@@ -45,7 +45,10 @@ local stopSpeed = sv_stopspeed or 100
 local accelerate = sv_accelerate or 10
 local airAccelerate = sv_airaccelerate or 10
 
--- No yaw tracking needed - we can get it directly from entity properties!
+-- Yaw tracking for prediction (store history of yaw changes)
+local lastYaw = {}
+local yawChangeHistory = {} -- Stores recent yaw deltas (degrees per tick)
+local YAW_HISTORY_SIZE = 33
 
 -- Calculate wishdir from cmd input
 local function CalculateWishDir(cmd)
@@ -211,6 +214,35 @@ local function UpdateTracking(entity, cmd)
 	if not entity then return end
 
 	local idx = entity:GetIndex()
+
+	-- Get current yaw
+	local angles
+	if entity == entities.GetLocalPlayer() then
+		angles = engine.GetViewAngles()
+	else
+		angles = entity:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
+	end
+
+	if angles then
+		local currentYaw = angles.y
+
+		-- Track yaw changes (store deltas in history)
+		if lastYaw[idx] then
+			local yawDelta = NormalizeAngle(currentYaw - lastYaw[idx])
+
+			-- Store in history
+			if not yawChangeHistory[idx] then
+				yawChangeHistory[idx] = {}
+			end
+			table.insert(yawChangeHistory[idx], 1, yawDelta)
+
+			-- Keep only recent history
+			if #yawChangeHistory[idx] > YAW_HISTORY_SIZE then
+				table.remove(yawChangeHistory[idx])
+			end
+		end
+		lastYaw[idx] = currentYaw
+	end
 
 	-- Track wishdir index changes (relative to view)
 	local currentWishdirIndex = GetWishdirIndex(cmd)
@@ -540,6 +572,16 @@ local function PredictPath(player, ticks, wishdir)
 	local mins, maxs = player:GetMins(), player:GetMaxs()
 	local index = player:GetIndex()
 
+	-- DEBUG: Print history status
+	if not _DEBUG_COUNTER then _DEBUG_COUNTER = 0 end
+	_DEBUG_COUNTER = _DEBUG_COUNTER + 1
+	if _DEBUG_COUNTER % 66 == 1 then -- Print once per second
+		local yawHistSize = yawHistory and #yawHistory or 0
+		local wishdirHistSize = (wishdirChangeHistory[index] and #wishdirChangeHistory[index]) or 0
+		print(string.format("[DEBUG] Yaw hist: %d | Wishdir hist: %d | YawRate: %.3f",
+			yawHistSize, wishdirHistSize, yawRotationPerTick))
+	end
+
 	-- Get yaw directly from entity (always available for all players)
 	local isLocalPlayer = (player == entities.GetLocalPlayer())
 	local angles
@@ -550,7 +592,22 @@ local function PredictPath(player, ticks, wishdir)
 	end
 	local currentYaw = angles and angles.y or 0
 
-	-- Wishdir prediction setup - combine yaw + history
+	-- Calculate yaw rotation rate from history (average recent changes)
+	-- For local player: don't predict yaw changes (we're not predicting mouse movement)
+	-- For enemies: predict based on history
+	local yawRotationPerTick = 0
+	if not isLocalPlayer then
+		local yawHistory = yawChangeHistory[index]
+		if yawHistory and #yawHistory > 0 then
+			local sum = 0
+			for i = 1, math.min(5, #yawHistory) do
+				sum = sum + yawHistory[i]
+			end
+			yawRotationPerTick = sum / math.min(5, #yawHistory)
+		end
+	end
+
+	-- Wishdir prediction setup
 	local currentWishdirIndex
 	local wishdirRotation = 0 -- Continuous rotation per tick
 
@@ -583,8 +640,8 @@ local function PredictPath(player, ticks, wishdir)
 	local currentVel = Vector3(velocity.x, velocity.y, velocity.z)
 
 	for tick = 1, ticks do
-		-- Yaw stays constant (we know it at prediction start)
-		-- For longer predictions, could re-query entity yaw, but for short predictions this is fine
+		-- Update yaw based on predicted change rate (from history average)
+		currentYaw = currentYaw + yawRotationPerTick
 
 		-- Get current wishdir
 		local currentWishdir
