@@ -6,7 +6,6 @@
 -- Config
 local PREDICT_TICKS = 120
 local DOT_SIZE = 4
-local LINE_WIDTH = 2
 
 -- Constants
 local FL_ONGROUND = (1 << 0)

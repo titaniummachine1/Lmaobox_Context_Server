@@ -30,13 +30,13 @@ local RuneTypes_t = {
 	RUNE_SUPERNOVA = 11,
 }
 
--- Get server cvars
-local sv_gravity = client.GetConVar("sv_gravity")
-local sv_stepsize = client.GetConVar("sv_stepsize")
-local sv_friction = client.GetConVar("sv_friction")
-local sv_stopspeed = client.GetConVar("sv_stopspeed")
-local sv_accelerate = client.GetConVar("sv_accelerate")
-local sv_airaccelerate = client.GetConVar("sv_airaccelerate")
+-- Get server cvars (client.GetConVar returns TWO values: ok, value)
+local _, sv_gravity = client.GetConVar("sv_gravity")
+local _, sv_stepsize = client.GetConVar("sv_stepsize")
+local _, sv_friction = client.GetConVar("sv_friction")
+local _, sv_stopspeed = client.GetConVar("sv_stopspeed")
+local _, sv_accelerate = client.GetConVar("sv_accelerate")
+local _, sv_airaccelerate = client.GetConVar("sv_airaccelerate")
 
 local gravity = sv_gravity or 800
 local stepSize = sv_stepsize or 18
@@ -45,10 +45,9 @@ local stopSpeed = sv_stopspeed or 100
 local accelerate = sv_accelerate or 10
 local airAccelerate = sv_airaccelerate or 10
 
--- Yaw tracking for prediction (store history of yaw changes)
+-- Yaw tracking for prediction (simple EMA smoothing)
 local lastYaw = {}
-local yawChangeHistory = {} -- Stores recent yaw deltas (degrees per tick)
-local YAW_HISTORY_SIZE = 33
+local yawRates = {} -- Smoothed yaw rotation rate per tick (degrees/tick)
 
 -- Calculate wishdir from cmd input
 local function CalculateWishDir(cmd)
@@ -74,20 +73,11 @@ local function CalculateWishDir(cmd)
 end
 
 -- Wishdir tracking (stores actual wishdir vectors)
-local currentWishdirVector = {} -- Current wishdir vector per player
+local currentWishdirVector = {}   -- Current wishdir vector per player
 local lastWishdirIndex = {}
-local wishdirChangeHistory = {} -- Stores recent changes (+1, -1, +4, -4, etc.)
+local wishdirDurationHistory = {} -- Stores last 33 [direction, duration] pairs
+local currentWishdirDuration = {} -- How long current direction has been held
 local WISHDIR_HISTORY_SIZE = 33
-
--- Pattern types
-local PATTERN_NONE = 0
-local PATTERN_CLOCKWISE = 1        -- +1
-local PATTERN_COUNTERCLOCKWISE = 2 -- -1
-local PATTERN_VERTICAL_OSC = 3     -- 0↔4, 1↔5, etc.
-local PATTERN_HORIZONTAL_OSC = 4   -- 2↔6, 3↔7
-
-local detectedPattern = {}
-local patternStrength = {} -- How consistent is the pattern (0-1)
 
 -- Normalize angle to -180 to 180
 local function NormalizeAngle(angle)
@@ -148,66 +138,31 @@ local function IndexToWishDir(dirIndex, yaw)
 	return Vector3(worldX, worldY, 0)
 end
 
--- Detect pattern from change history (pick most likely, no thresholds)
-local function DetectPattern(idx)
-	local history = wishdirChangeHistory[idx]
-	if not history or #history < 3 then
-		return PATTERN_NONE, 0
+-- Analyze wishdir pattern from duration history (use ALL 33 entries)
+local function AnalyzeWishdirPattern(idx)
+	local history = wishdirDurationHistory[idx]
+	if not history or #history < 2 then
+		return 0, 10 -- Default: no change, 10 tick duration
 	end
 
-	-- Count evidence for each pattern type
-	local clockwiseCount = 0
-	local counterClockwiseCount = 0
-	local noChangeCount = 0
+	-- Calculate average duration and average direction change
+	local totalDuration = 0
+	local totalChange = 0
 
 	for i = 1, #history do
-		if history[i] == 1 then
-			clockwiseCount = clockwiseCount + 1
-		elseif history[i] == -1 then
-			counterClockwiseCount = counterClockwiseCount + 1
-		elseif history[i] == 0 then
-			noChangeCount = noChangeCount + 1
+		totalDuration = totalDuration + history[i].duration
+		if i > 1 then
+			local delta = history[i].dir - history[i - 1].dir
+			-- Normalize to shortest path (-4 to 4)
+			delta = ((delta + 4) % 8) - 4
+			totalChange = totalChange + delta
 		end
 	end
 
-	-- Check for oscillation (changes alternate between +4 and -4)
-	local oscillationCount = 0
-	for i = 2, #history do
-		local curr = history[i]
-		local prev = history[i - 1]
+	local avgDuration = totalDuration / #history
+	local avgChange = #history > 1 and (totalChange / (#history - 1)) or 0
 
-		-- Check if alternating between opposite directions
-		if (curr == 4 and prev == -4) or (curr == -4 and prev == 4) then
-			oscillationCount = oscillationCount + 1
-		end
-	end
-
-	local total = #history
-
-	-- Find most likely pattern (highest count wins)
-	local maxCount = math.max(clockwiseCount, counterClockwiseCount, oscillationCount, noChangeCount)
-
-	-- If mostly no change, it's walking straight
-	if maxCount == noChangeCount then
-		return PATTERN_NONE, noChangeCount / total
-	end
-
-	-- Pick pattern with highest evidence
-	if maxCount == clockwiseCount then
-		return PATTERN_CLOCKWISE, clockwiseCount / total
-	elseif maxCount == counterClockwiseCount then
-		return PATTERN_COUNTERCLOCKWISE, counterClockwiseCount / total
-	elseif maxCount == oscillationCount then
-		-- Determine if vertical or horizontal
-		local lastIdx = lastWishdirIndex[idx]
-		if lastIdx == 0 or lastIdx == 4 or lastIdx == 1 or lastIdx == 5 then
-			return PATTERN_VERTICAL_OSC, oscillationCount / (total - 1)
-		else
-			return PATTERN_HORIZONTAL_OSC, oscillationCount / (total - 1)
-		end
-	end
-
-	return PATTERN_NONE, 0
+	return avgChange, avgDuration
 end
 
 local function UpdateTracking(entity, cmd)
@@ -215,7 +170,7 @@ local function UpdateTracking(entity, cmd)
 
 	local idx = entity:GetIndex()
 
-	-- Get current yaw
+	-- Get current yaw (works for everyone - local player & enemies)
 	local angles
 	if entity == entities.GetLocalPlayer() then
 		angles = engine.GetViewAngles()
@@ -226,50 +181,48 @@ local function UpdateTracking(entity, cmd)
 	if angles then
 		local currentYaw = angles.y
 
-		-- Track yaw changes (store deltas in history)
+		-- Simple EMA smoothing (0.8 * old + 0.2 * new)
 		if lastYaw[idx] then
 			local yawDelta = NormalizeAngle(currentYaw - lastYaw[idx])
-
-			-- Store in history
-			if not yawChangeHistory[idx] then
-				yawChangeHistory[idx] = {}
-			end
-			table.insert(yawChangeHistory[idx], 1, yawDelta)
-
-			-- Keep only recent history
-			if #yawChangeHistory[idx] > YAW_HISTORY_SIZE then
-				table.remove(yawChangeHistory[idx])
-			end
+			yawRates[idx] = (yawRates[idx] or 0) * 0.8 + yawDelta * 0.2
+		else
+			yawRates[idx] = 0
 		end
 		lastYaw[idx] = currentYaw
 	end
 
-	-- Track wishdir index changes (relative to view)
+	-- Track wishdir duration patterns (how long each direction is held)
 	local currentWishdirIndex = GetWishdirIndex(cmd)
-	if currentWishdirIndex and lastWishdirIndex[idx] and currentWishdirIndex ~= lastWishdirIndex[idx] then
-		local dirDelta = currentWishdirIndex - lastWishdirIndex[idx]
-
-		-- Normalize to shortest path in 8-direction circular space (-4 to 4)
-		dirDelta = ((dirDelta + 4) % 8) - 4
-
-		-- Store change in history
-		if not wishdirChangeHistory[idx] then
-			wishdirChangeHistory[idx] = {}
-		end
-		table.insert(wishdirChangeHistory[idx], 1, dirDelta)
-
-		-- Keep only last N changes
-		while #wishdirChangeHistory[idx] > WISHDIR_HISTORY_SIZE do
-			table.remove(wishdirChangeHistory[idx])
-		end
-
-		-- Detect pattern
-		local pattern, strength = DetectPattern(idx)
-		detectedPattern[idx] = pattern
-		patternStrength[idx] = strength
-	end
-
 	if currentWishdirIndex then
+		-- Initialize duration counter
+		if not currentWishdirDuration[idx] then
+			currentWishdirDuration[idx] = 0
+		end
+
+		-- Check if direction changed
+		if lastWishdirIndex[idx] and currentWishdirIndex ~= lastWishdirIndex[idx] then
+			-- Direction changed! Store the previous [direction, duration] pair
+			if not wishdirDurationHistory[idx] then
+				wishdirDurationHistory[idx] = {}
+			end
+
+			table.insert(wishdirDurationHistory[idx], 1, {
+				dir = lastWishdirIndex[idx],
+				duration = currentWishdirDuration[idx]
+			})
+
+			-- Keep only last 33 entries
+			while #wishdirDurationHistory[idx] > WISHDIR_HISTORY_SIZE do
+				table.remove(wishdirDurationHistory[idx])
+			end
+
+			-- Reset duration counter
+			currentWishdirDuration[idx] = 1
+		else
+			-- Same direction, increment duration
+			currentWishdirDuration[idx] = currentWishdirDuration[idx] + 1
+		end
+
 		lastWishdirIndex[idx] = currentWishdirIndex
 	end
 end
@@ -320,23 +273,23 @@ local function GetAirSpeedCap(target)
 			local m_iClass = target:GetPropInt("m_iClass")
 			return (m_iClass == 2 or m_iClass == 6) and 850 or 950 -- Soldier or Heavy
 		end
-		local tf_grapplinghook_move_speed = client.GetConVar("tf_grapplinghook_move_speed")
+		local _, tf_grapplinghook_move_speed = client.GetConVar("tf_grapplinghook_move_speed")
 		return tf_grapplinghook_move_speed or 750
 	elseif target:InCond(76) then -- TFCond_Charging
-		local tf_max_charge_speed = client.GetConVar("tf_max_charge_speed")
+		local _, tf_max_charge_speed = client.GetConVar("tf_max_charge_speed")
 		return tf_max_charge_speed or 750
 	else
 		local flCap = 30.0
 		if target:InCond(71) then -- TFCond_ParachuteDeployed
-			local tf_parachute_aircontrol = client.GetConVar("tf_parachute_aircontrol")
+			local _, tf_parachute_aircontrol = client.GetConVar("tf_parachute_aircontrol")
 			flCap = flCap * (tf_parachute_aircontrol or 1.0)
 		end
 		if target:InCond(79) then -- TFCond_HalloweenKart
 			if target:InCond(80) then -- TFCond_HalloweenKartDash
-				local tf_halloween_kart_dash_speed = client.GetConVar("tf_halloween_kart_dash_speed")
+				local _, tf_halloween_kart_dash_speed = client.GetConVar("tf_halloween_kart_dash_speed")
 				return tf_halloween_kart_dash_speed or 750
 			end
-			local tf_hallowen_kart_aircontrol = client.GetConVar("tf_hallowen_kart_aircontrol")
+			local _, tf_hallowen_kart_aircontrol = client.GetConVar("tf_hallowen_kart_aircontrol")
 			flCap = flCap * (tf_hallowen_kart_aircontrol or 1.0)
 		end
 		return flCap * (target:AttributeHookFloat("mod_air_control") or 1.0)
@@ -572,66 +525,32 @@ local function PredictPath(player, ticks, wishdir)
 	local mins, maxs = player:GetMins(), player:GetMaxs()
 	local index = player:GetIndex()
 
-	-- DEBUG: Print history status
-	if not _DEBUG_COUNTER then _DEBUG_COUNTER = 0 end
-	_DEBUG_COUNTER = _DEBUG_COUNTER + 1
-	if _DEBUG_COUNTER % 66 == 1 then -- Print once per second
-		local yawHistSize = yawHistory and #yawHistory or 0
-		local wishdirHistSize = (wishdirChangeHistory[index] and #wishdirChangeHistory[index]) or 0
-		print(string.format("[DEBUG] Yaw hist: %d | Wishdir hist: %d | YawRate: %.3f",
-			yawHistSize, wishdirHistSize, yawRotationPerTick))
-	end
-
-	-- Get yaw directly from entity (always available for all players)
-	local isLocalPlayer = (player == entities.GetLocalPlayer())
+	-- Get current yaw (works for everyone - local player & enemies)
 	local angles
-	if isLocalPlayer then
+	if player == entities.GetLocalPlayer() then
 		angles = engine.GetViewAngles()
 	else
 		angles = player:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
 	end
 	local currentYaw = angles and angles.y or 0
 
-	-- Calculate yaw rotation rate from history (average recent changes)
-	-- For local player: don't predict yaw changes (we're not predicting mouse movement)
-	-- For enemies: predict based on history
-	local yawRotationPerTick = 0
-	if not isLocalPlayer then
-		local yawHistory = yawChangeHistory[index]
-		if yawHistory and #yawHistory > 0 then
-			local sum = 0
-			for i = 1, math.min(5, #yawHistory) do
-				sum = sum + yawHistory[i]
-			end
-			yawRotationPerTick = sum / math.min(5, #yawHistory)
-		end
-	end
+	-- Get yaw rotation rate (ALWAYS predict yaw for everyone)
+	local yawRotationPerTick = yawRates[index] or 0
 
 	-- Wishdir prediction setup
 	local currentWishdirIndex
-	local wishdirRotation = 0 -- Continuous rotation per tick
+	local wishdirChangeRate = 0   -- Average direction change per tick
+	local wishdirChangeDuration = 10 -- Average ticks before changing direction
 
 	if wishdir then
-		-- Convert provided wishdir to direction index (keep constant in world space)
-		currentWishdirIndex = nil -- Will recalculate each tick from constant wishdir
+		-- Local player: use provided wishdir from cmd (we know exact input)
+		currentWishdirIndex = nil -- Will use constant wishdir
 	else
-		-- Use tracked wishdir index
+		-- Enemies: predict from duration pattern (use ALL 33 history entries)
 		currentWishdirIndex = lastWishdirIndex[index] or 0
 
-		-- Get wishdir rotation from history
-		local history = wishdirChangeHistory[index]
-		local historyRotation = 0
-		if history and #history > 0 then
-			-- Average recent changes to get rotation tendency
-			local sum = 0
-			for i = 1, math.min(5, #history) do
-				sum = sum + history[i]
-			end
-			historyRotation = sum / math.min(5, #history)
-		end
-
-		-- For enemies: use wishdir history directly (no rate limiting!)
-		wishdirRotation = historyRotation
+		-- Get pattern from all 33 entries
+		wishdirChangeRate, wishdirChangeDuration = AnalyzeWishdirPattern(index)
 	end
 
 	path[0] = Vector3(origin.x, origin.y, origin.z)
@@ -639,27 +558,40 @@ local function PredictPath(player, ticks, wishdir)
 	-- Start with ACTUAL current velocity (make a COPY, not reference)
 	local currentVel = Vector3(velocity.x, velocity.y, velocity.z)
 
+	-- Track when to change wishdir (for enemies only)
+	local ticksSinceWishdirChange = 0
+
 	for tick = 1, ticks do
-		-- Update yaw based on predicted change rate (from history average)
+		-- Step 1: Update yaw (ALWAYS - for everyone, like strafe tracking)
 		currentYaw = currentYaw + yawRotationPerTick
 
-		-- Get current wishdir
+		-- Step 2: Calculate current wishdir
 		local currentWishdir
 		if wishdir then
-			-- Use provided constant wishdir
+			-- Local player: use known constant wishdir from cmd
 			currentWishdir = wishdir
 		else
-			-- Smoothly rotate wishdir index (continuous, not discrete jumps)
-			currentWishdirIndex = currentWishdirIndex + wishdirRotation
+			-- Enemies: predict wishdir changes based on duration pattern
+			ticksSinceWishdirChange = ticksSinceWishdirChange + 1
 
-			-- Convert index + yaw to world-space wishdir (auto-snaps to 8 directions)
+			-- Check if it's time to change direction
+			if ticksSinceWishdirChange >= wishdirChangeDuration then
+				currentWishdirIndex = currentWishdirIndex + wishdirChangeRate
+				ticksSinceWishdirChange = 0
+			end
+
+			-- Convert index + current yaw to world-space wishdir
+			-- Wishdir rotates with yaw (wishdir is "child" of yaw)
 			currentWishdir = IndexToWishDir(currentWishdirIndex, currentYaw)
 		end
 
+		-- Step 3: Physics simulation
 		local is_on_ground = CheckIsOnGround(origin, mins, maxs, index)
 
+		-- Friction (only on ground)
 		Friction(currentVel, is_on_ground, tickinterval)
 
+		-- Acceleration
 		if is_on_ground then
 			Accelerate(currentVel, currentWishdir, maxspeed, accelerate, tickinterval)
 			currentVel.z = 0
@@ -668,14 +600,15 @@ local function PredictPath(player, ticks, wishdir)
 			currentVel.z = currentVel.z - gravity * tickinterval
 		end
 
-		-- Perform collision-aware movement
+		-- Collision detection & resolution
 		origin = TryPlayerMove(origin, currentVel, mins, maxs, index, tickinterval)
 
-		-- If on ground, stick to it
+		-- Stick to ground
 		if is_on_ground then
 			StayOnGround(origin, mins, maxs, stepSize, index)
 		end
 
+		-- Store position
 		path[tick] = Vector3(origin.x, origin.y, origin.z)
 	end
 
@@ -761,5 +694,5 @@ callbacks.Unregister("Draw", "AdvancedPredictionVisualizer")
 callbacks.Register("CreateMove", "AdvancedPredictionVisualizer_Yaw", OnCreateMove)
 callbacks.Register("Draw", "AdvancedPredictionVisualizer", OnDraw)
 
-print("[Advanced Prediction Visualizer] Loaded - Full physics simulation with yaw prediction (" ..
+print("[Advanced Prediction Visualizer] Loaded - Full physics + input prediction (yaw + wishdir, " ..
 	PREDICT_TICKS .. " ticks)")
