@@ -73,15 +73,49 @@ local function CalculateWishDir(cmd)
 end
 
 -- Wishdir tracking (stores actual wishdir vectors)
-local currentWishdirVector = {}   -- Current wishdir vector per player
+local currentWishdirVector = {}    -- Current wishdir vector per player
 local lastWishdirIndex = {}
-local wishdirDurationHistory = {} -- Stores last 33 [direction, duration] pairs
-local currentWishdirDuration = {} -- How long current direction has been held
-local WISHDIR_HISTORY_SIZE = 33
+local wishdirChangeHistory = {}    -- Stores last 33 changes: {ticksSinceLastChange, directionDelta}
+local wishdirTicksSinceChange = {} -- Counter for ticks since last wishdir change
+local wishdirUpdateRateEma = {}    -- EMA of ticks between wishdir changes
+local wishdirStepEma = {}          -- EMA of wishdir delta (signed steps)
+local wishdirLastStep = {}         -- Last non-zero step observed (signed)
+local WISHDIR_HISTORY_SIZE = 66
 
 -- Normalize angle to -180 to 180
 local function NormalizeAngle(angle)
 	return ((angle + 180) % 360) - 180
+end
+
+-- Calculate wishdir angle RELATIVE to view direction (returns offset angle in degrees)
+local function GetWishdirRelativeAngle(wishdir, viewYaw)
+	if not wishdir then return 0 end
+
+	-- Get wishdir's world angle
+	local wishdirAngle = math.atan(wishdir.y, wishdir.x) * (180 / math.pi)
+
+	-- Calculate offset from view direction
+	local relativeAngle = NormalizeAngle(wishdirAngle - viewYaw)
+
+	return relativeAngle
+end
+
+-- Apply relative wishdir offset to current view direction
+local function ApplyWishdirOffset(viewYaw, relativeAngle)
+	-- Calculate world angle from view + offset
+	local worldAngle = (viewYaw + relativeAngle) * (math.pi / 180)
+
+	-- Return world-space wishdir vector
+	return Vector3(math.cos(worldAngle), math.sin(worldAngle), 0)
+end
+
+-- Round a discrete wishdir delta (keeps value in [-4, 4]) and ignores tiny noise
+local function RoundWishdirDelta(delta)
+	if delta > 0 then
+		return math.min(4, math.floor(delta + 0.5))
+	end
+
+	return math.max(-4, math.ceil(delta - 0.5))
 end
 
 -- 8 directional movement relative to view
@@ -138,31 +172,51 @@ local function IndexToWishDir(dirIndex, yaw)
 	return Vector3(worldX, worldY, 0)
 end
 
--- Analyze wishdir pattern from duration history (use ALL 33 entries)
+-- Derive wishdir index from observed velocity (used for non-local players)
+local function GetWishdirIndexFromVelocity(velocity, viewYaw)
+	if not velocity then
+		return nil
+	end
+
+	-- Ignore tiny jitter
+	local speedSqr = velocity.x * velocity.x + velocity.y * velocity.y
+	if speedSqr < 25 then
+		return nil
+	end
+
+	local velAngle = math.atan(velocity.y, velocity.x) * (180 / math.pi)
+	local relative = NormalizeAngle(velAngle - (viewYaw or 0))
+
+	-- Snap to 8 directions (relative to view yaw)
+	local dirIndex = (math.floor((relative + 22.5) / 45) % 8 + 8) % 8
+
+	return dirIndex
+end
+
+-- Analyze wishdir pattern from change history (EMA over last 66 entries)
+-- Returns: avgMagnitude (direction delta), avgUpdateRate (ticks between changes)
 local function AnalyzeWishdirPattern(idx)
-	local history = wishdirDurationHistory[idx]
+	local history = wishdirChangeHistory[idx]
 	if not history or #history < 2 then
-		return 0, 10 -- Default: no change, 10 tick duration
+		return 0, 999 -- Default: no change, never update
 	end
 
-	-- Calculate average duration and average direction change
-	local totalDuration = 0
-	local totalChange = 0
+	-- EMA smoothing (like yaw): alpha = 0.2, iterate oldest -> newest
+	local alpha = 0.2
+	local emaTicks = history[#history].ticks
+	local emaMag = history[#history].delta
 
-	for i = 1, #history do
-		totalDuration = totalDuration + history[i].duration
-		if i > 1 then
-			local delta = history[i].dir - history[i - 1].dir
-			-- Normalize to shortest path (-4 to 4)
-			delta = ((delta + 4) % 8) - 4
-			totalChange = totalChange + delta
-		end
+	for i = #history - 1, 1, -1 do
+		emaTicks = emaTicks * (1 - alpha) + history[i].ticks * alpha
+		emaMag = emaMag * (1 - alpha) + history[i].delta * alpha
 	end
 
-	local avgDuration = totalDuration / #history
-	local avgChange = #history > 1 and (totalChange / (#history - 1)) or 0
+	local avgUpdateRate = math.max(1, emaTicks) -- Avoid zero / instant change
 
-	return avgChange, avgDuration
+	-- Discrete magnitude: snap to allowed steps
+	local avgMagnitude = RoundWishdirDelta(emaMag)
+
+	return avgMagnitude, avgUpdateRate
 end
 
 local function UpdateTracking(entity, cmd)
@@ -178,9 +232,18 @@ local function UpdateTracking(entity, cmd)
 		angles = entity:GetPropVector("tfnonlocaldata", "m_angEyeAngles[0]")
 	end
 
-	if angles then
-		local currentYaw = angles.y
+	local currentYaw
+	if angles and angles.y then
+		currentYaw = angles.y
+	else
+		-- Fallback: derive yaw from velocity heading if eye angles unavailable
+		local vel = entity:GetPropVector("localdata", "m_vecVelocity[0]") or entity:EstimateAbsVelocity()
+		if vel and (vel.x ~= 0 or vel.y ~= 0) then
+			currentYaw = math.atan(vel.y, vel.x) * (180 / math.pi)
+		end
+	end
 
+	if currentYaw then
 		-- Simple EMA smoothing (0.8 * old + 0.2 * new)
 		if lastYaw[idx] then
 			local yawDelta = NormalizeAngle(currentYaw - lastYaw[idx])
@@ -191,36 +254,58 @@ local function UpdateTracking(entity, cmd)
 		lastYaw[idx] = currentYaw
 	end
 
-	-- Track wishdir duration patterns (how long each direction is held)
-	local currentWishdirIndex = GetWishdirIndex(cmd)
+	-- Track wishdir change patterns (update rate + magnitude)
+	local currentWishdirIndex
+	if cmd then
+		currentWishdirIndex = GetWishdirIndex(cmd)
+	elseif currentYaw then
+		local velocity = entity:GetPropVector("localdata", "m_vecVelocity[0]") or entity:EstimateAbsVelocity()
+		currentWishdirIndex = GetWishdirIndexFromVelocity(velocity, currentYaw)
+	end
+
 	if currentWishdirIndex then
-		-- Initialize duration counter
-		if not currentWishdirDuration[idx] then
-			currentWishdirDuration[idx] = 0
+		-- Initialize tick counter
+		if not wishdirTicksSinceChange[idx] then
+			wishdirTicksSinceChange[idx] = 0
 		end
+
+		-- Increment tick counter
+		wishdirTicksSinceChange[idx] = wishdirTicksSinceChange[idx] + 1
 
 		-- Check if direction changed
 		if lastWishdirIndex[idx] and currentWishdirIndex ~= lastWishdirIndex[idx] then
-			-- Direction changed! Store the previous [direction, duration] pair
-			if not wishdirDurationHistory[idx] then
-				wishdirDurationHistory[idx] = {}
+			-- Direction changed! Calculate delta and store change
+			local dirDelta = currentWishdirIndex - lastWishdirIndex[idx]
+
+			-- Normalize to shortest path in 8-direction space (-4 to 4)
+			dirDelta = ((dirDelta + 4) % 8) - 4
+
+			-- EMA track update rate (ticks) and step magnitude/direction
+			local alpha = 0.2
+			local prevRate = wishdirUpdateRateEma[idx]
+			local prevStep = wishdirStepEma[idx]
+			wishdirUpdateRateEma[idx] = prevRate and (prevRate * (1 - alpha) + wishdirTicksSinceChange[idx] * alpha)
+				or wishdirTicksSinceChange[idx]
+			wishdirStepEma[idx] = prevStep and (prevStep * (1 - alpha) + dirDelta * alpha) or dirDelta
+			wishdirLastStep[idx] = dirDelta
+
+			-- Store change: {ticks since last change, direction delta}
+			if not wishdirChangeHistory[idx] then
+				wishdirChangeHistory[idx] = {}
 			end
 
-			table.insert(wishdirDurationHistory[idx], 1, {
-				dir = lastWishdirIndex[idx],
-				duration = currentWishdirDuration[idx]
+			table.insert(wishdirChangeHistory[idx], 1, {
+				ticks = wishdirTicksSinceChange[idx],
+				delta = dirDelta
 			})
 
 			-- Keep only last 33 entries
-			while #wishdirDurationHistory[idx] > WISHDIR_HISTORY_SIZE do
-				table.remove(wishdirDurationHistory[idx])
+			while #wishdirChangeHistory[idx] > WISHDIR_HISTORY_SIZE do
+				table.remove(wishdirChangeHistory[idx])
 			end
 
-			-- Reset duration counter
-			currentWishdirDuration[idx] = 1
-		else
-			-- Same direction, increment duration
-			currentWishdirDuration[idx] = currentWishdirDuration[idx] + 1
+			-- Reset tick counter
+			wishdirTicksSinceChange[idx] = 0
 		end
 
 		lastWishdirIndex[idx] = currentWishdirIndex
@@ -539,50 +624,80 @@ local function PredictPath(player, ticks, wishdir)
 
 	-- Wishdir prediction setup
 	local currentWishdirIndex
-	local wishdirChangeRate = 0   -- Average direction change per tick
-	local wishdirChangeDuration = 10 -- Average ticks before changing direction
+	local wishdirChangeMagnitude = 0 -- Average direction delta (in 8-state space)
+	local wishdirUpdateRate = 999 -- Average ticks between changes (binary update rate)
+	local wishdirRelativeAngle = 0 -- For local player: offset from view direction
 
 	if wishdir then
-		-- Local player: use provided wishdir from cmd (we know exact input)
-		currentWishdirIndex = nil -- Will use constant wishdir
+		-- Local player: calculate wishdir as OFFSET from current view direction
+		-- This offset stays constant, wishdir inherits all view rotation automatically
+		wishdirRelativeAngle = GetWishdirRelativeAngle(wishdir, currentYaw)
 	else
-		-- Enemies: predict from duration pattern (use ALL 33 history entries)
-		currentWishdirIndex = lastWishdirIndex[index] or 0
+		-- Enemies: predict from change history (use ALL 33 history entries)
+		local initialWishdirIndex = lastWishdirIndex[index] or 0
+		-- Convert initial index to relative angle for dynamic changes
+		wishdirRelativeAngle = (initialWishdirIndex * 45) % 360 -- Convert to degrees relative to view
 
-		-- Get pattern from all 33 entries
-		wishdirChangeRate, wishdirChangeDuration = AnalyzeWishdirPattern(index)
+		-- Prefer EMA (yaw-style). Fallback to history if not enough samples.
+		wishdirChangeMagnitude = wishdirStepEma[index]
+		wishdirUpdateRate = wishdirUpdateRateEma[index]
+		if not wishdirChangeMagnitude or not wishdirUpdateRate then
+			wishdirChangeMagnitude, wishdirUpdateRate = AnalyzeWishdirPattern(index)
+		end
 	end
+
+	-- Snap inputs for simulation
+	wishdirChangeMagnitude = RoundWishdirDelta(wishdirChangeMagnitude or 0)
+	wishdirUpdateRate = math.max(1, wishdirUpdateRate or 999)
+	local lastStep = RoundWishdirDelta(wishdirLastStep[index] or 0)
 
 	path[0] = Vector3(origin.x, origin.y, origin.z)
 
 	-- Start with ACTUAL current velocity (make a COPY, not reference)
 	local currentVel = Vector3(velocity.x, velocity.y, velocity.z)
 
-	-- Track when to change wishdir (for enemies only)
-	local ticksSinceWishdirChange = 0
+	-- Track when to change wishdir (for enemies only) - use isolated counter for simulation
+	local ticksSinceWishdirChange = 0 -- Start fresh for prediction
 
 	for tick = 1, ticks do
 		-- Step 1: Update yaw (ALWAYS - for everyone, like strafe tracking)
 		currentYaw = currentYaw + yawRotationPerTick
 
-		-- Step 2: Calculate current wishdir
+		-- Step 2: Calculate current wishdir (inherits view rotation)
 		local currentWishdir
 		if wishdir then
-			-- Local player: use known constant wishdir from cmd
-			currentWishdir = wishdir
+			-- Local player: wishdir is OFFSET from view direction
+			-- Automatically rotates with yaw (foolproof, no error accumulation)
+			currentWishdir = ApplyWishdirOffset(currentYaw, wishdirRelativeAngle)
 		else
-			-- Enemies: predict wishdir changes based on duration pattern
+			-- Enemies: predict wishdir changes based on tracked pattern
 			ticksSinceWishdirChange = ticksSinceWishdirChange + 1
 
-			-- Check if it's time to change direction
-			if ticksSinceWishdirChange >= wishdirChangeDuration then
-				currentWishdirIndex = currentWishdirIndex + wishdirChangeRate
+			-- Check if it's time to change direction (binary update rate)
+			if ticksSinceWishdirChange >= wishdirUpdateRate then
+				-- Get the change magnitude (should be 1, -1, 3, -3 for meaningful direction changes)
+				local step = wishdirChangeMagnitude
+				if step == 0 then
+					-- Fallback to last observed non-zero step
+					step = lastStep
+				end
+				if step == 0 and wishdirChangeHistory[index] and wishdirChangeHistory[index][1] then
+					step = wishdirChangeHistory[index][1].delta
+				end
+
+				-- Only apply significant changes (1, -1, 3, -3 as mentioned)
+				local validSteps = { [-3] = true, [-1] = true, [1] = true, [3] = true }
+				if step ~= 0 and validSteps[step] then
+					-- Convert step to angle delta (45 degrees per step in 8-direction space)
+					local angleDelta = step * 45
+					wishdirRelativeAngle = wishdirRelativeAngle + angleDelta
+					lastStep = step
+				end
 				ticksSinceWishdirChange = 0
 			end
 
-			-- Convert index + current yaw to world-space wishdir
-			-- Wishdir rotates with yaw (wishdir is "child" of yaw)
-			currentWishdir = IndexToWishDir(currentWishdirIndex, currentYaw)
+			-- Apply relative angle to current view direction to get world-space wishdir
+			currentWishdir = ApplyWishdirOffset(currentYaw, wishdirRelativeAngle)
 		end
 
 		-- Step 3: Physics simulation
@@ -620,6 +735,13 @@ local function OnDraw()
 	local me = entities.GetLocalPlayer()
 	if not me or not me:IsAlive() then
 		return
+	end
+
+	-- Keep enemy wishdir/yaw history updated using observed movement
+	for _, player in ipairs(entities.FindByClass("CTFPlayer")) do
+		if player ~= me and player:IsAlive() then
+			UpdateTracking(player)
+		end
 	end
 
 	-- Predict path using actual tracked wishdir (accurate for local player)
