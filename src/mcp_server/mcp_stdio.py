@@ -63,13 +63,13 @@ def handle_tools_list() -> dict:
             },
             {
                 "name": "bundle",
-                "description": "Bundle and deploy Lua to %LOCALAPPDATA%/lua. USAGE: Provide path to folder containing Main.lua. That folder IS the bundle root - all require() calls resolve from there. Example: projectDir='test_bundle/src' if Main.lua is in test_bundle/src/Main.lua",
+                "description": "Bundle and deploy Lua to %LOCALAPPDATA%/lua. USAGE: Provide path to folder containing Main.lua. That folder IS the bundle root - all require() calls resolve from there. Works with any workspace, not just this repo.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "projectDir": {
                             "type": "string",
-                            "description": "Path to folder containing Main.lua (relative to workspace root). This folder becomes the bundle root. MUST contain Main.lua. Example: 'prototypes' or 'test_bundle/src'"
+                            "description": "Path to folder containing Main.lua. Can be absolute (C:/my_project) or relative to workspace (my_project/src). This folder becomes the bundle root. MUST contain Main.lua unless entryFile is specified."
                         },
                         "entryFile": {
                             "type": "string",
@@ -77,11 +77,11 @@ def handle_tools_list() -> dict:
                         },
                         "bundleOutputDir": {
                             "type": "string",
-                            "description": "Override for build output (advanced use only)"
+                            "description": "Override for build output. Can be absolute or relative to projectDir. Defaults to projectDir/build."
                         },
                         "deployDir": {
                             "type": "string",
-                            "description": "Override deployment target (advanced use only, defaults to %LOCALAPPDATA%/lua)"
+                            "description": "Override deployment target. Can be absolute or relative to projectDir. Defaults to %LOCALAPPDATA%/lua."
                         }
                     },
                     "required": ["projectDir"]
@@ -95,33 +95,59 @@ def _run_bundle(arguments: dict) -> dict:
     """Run the bundle-and-deploy automation and return its output."""
     project_dir = arguments.get("projectDir")
     if not project_dir:
-        raise ValueError("projectDir is required. Specify directory containing Lua files (e.g., 'test_bundle')")
-    
-    repo_root = Path(__file__).resolve().parents[2]
-    script_path = repo_root / "automations" / "bundle-and-deploy.js"
+        raise ValueError(
+            "projectDir is required. Specify directory containing Lua files (e.g., 'my_project')")
+
+    # Resolve project_dir: if absolute, use as-is; if relative, resolve from CWD
+    project_path = Path(project_dir).expanduser()
+    if not project_path.is_absolute():
+        # Try relative to current working directory (Cursor workspace)
+        project_path = Path.cwd() / project_path
+
+    project_path = project_path.resolve()
+
+    if not project_path.exists():
+        raise FileNotFoundError(
+            f"Project directory not found: {project_path}\n"
+            f"Provided: {project_dir}\n"
+            f"CWD: {Path.cwd()}"
+        )
+
+    # Find bundle script: first check MCP server's repo, then check PATH
+    mcp_server_root = Path(__file__).resolve().parents[2]
+    script_path = mcp_server_root / "automations" / "bundle-and-deploy.js"
+
     if not script_path.exists():
         raise FileNotFoundError(
-            f"bundle script missing: {script_path}. Ensure automations are installed."
+            f"bundle script missing: {script_path}\n"
+            f"Ensure automations are installed in the MCP server directory."
         )
 
     env = os.environ.copy()
-    env["PROJECT_DIR"] = str(Path(project_dir).expanduser())
-    
+    env["PROJECT_DIR"] = str(project_path)
+
     entry_file = arguments.get("entryFile")
     if entry_file:
         env["ENTRY_FILE"] = str(entry_file)
-    
+
     bundle_output_dir = arguments.get("bundleOutputDir")
     if bundle_output_dir:
-        env["BUNDLE_OUTPUT_DIR"] = str(Path(bundle_output_dir).expanduser())
-    
+        bundle_output_path = Path(bundle_output_dir).expanduser()
+        if not bundle_output_path.is_absolute():
+            bundle_output_path = project_path / bundle_output_path
+        env["BUNDLE_OUTPUT_DIR"] = str(bundle_output_path.resolve())
+
     deploy_dir = arguments.get("deployDir")
     if deploy_dir:
-        env["DEPLOY_DIR"] = str(Path(deploy_dir).expanduser())
+        deploy_path = Path(deploy_dir).expanduser()
+        if not deploy_path.is_absolute():
+            deploy_path = project_path / deploy_dir
+        env["DEPLOY_DIR"] = str(deploy_path.resolve())
 
+    # Run bundler from MCP server location (it needs node_modules)
     process = subprocess.run(
         ["node", str(script_path)],
-        cwd=str(repo_root),
+        cwd=str(mcp_server_root),
         env=env,
         capture_output=True,
         text=True,
