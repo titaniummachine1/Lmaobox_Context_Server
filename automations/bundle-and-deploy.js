@@ -198,50 +198,104 @@ async function buildDependencyTree(entryFile, searchPaths, visited = new Set(), 
 }
 
 function printDependencyTree() {
-	console.log("\n[Bundle] === Dependency Tree ===");
+	// Collect all unique files and their direct dependencies
+	const allFiles = new Map();
 	
-	const printed = new Set();
-	
-	function printNode(filePath, indent = 0, prefix = "") {
-		const normalizedPath = path.normalize(filePath);
-		const relativePath = path.relative(PROJECT_DIR, normalizedPath);
-		const isCircular = circularDeps.has(normalizedPath);
-		const marker = isCircular ? " [CIRCULAR]" : "";
+	function collectDeps(filePath) {
+		const normalized = path.normalize(filePath);
+		if (allFiles.has(normalized)) return;
 		
-		console.log(`${" ".repeat(indent)}${prefix}${relativePath}${marker}`);
+		const deps = moduleGraph.get(normalized) || [];
+		allFiles.set(normalized, deps);
 		
-		if (printed.has(normalizedPath) || isCircular) {
-			return;
-		}
-		
-		printed.add(normalizedPath);
-		
-		const deps = moduleGraph.get(normalizedPath) || [];
-		deps.forEach((dep, index) => {
-			const isLast = index === deps.length - 1;
-			const connector = isLast ? "└─" : "├─";
-			const childIndent = indent + 2;
-			
-			if (dep.global) {
-				console.log(`${" ".repeat(childIndent)}${connector}${dep.name} [GLOBAL - runtime require]`);
-			} else if (dep.unresolved) {
-				console.log(`${" ".repeat(childIndent)}${connector}${dep.name} [UNRESOLVED]`);
-			} else if (dep.path) {
-				printNode(dep.path, childIndent, connector);
+		deps.forEach(dep => {
+			if (dep.path) {
+				collectDeps(dep.path);
 			}
 		});
 	}
 	
-	printNode(ENTRY_FILE);
+	collectDeps(ENTRY_FILE);
 	
-	if (circularDeps.size > 0) {
-		console.log("\n[Bundle] ⚠️  Circular dependencies detected:");
-		circularDeps.forEach(dep => {
-			console.log(`  - ${path.relative(PROJECT_DIR, dep)}`);
+	// Print flat dependency list
+	console.log("\n[Bundle] Dependencies (what requires what):\n");
+	
+	allFiles.forEach((deps, filePath) => {
+		const relPath = path.relative(PROJECT_DIR, filePath);
+		const fileName = path.basename(relPath);
+		
+		if (deps.length === 0) {
+			console.log(`  ${fileName}`);
+		} else {
+			const depNames = deps.map(d => {
+				if (d.global) return `${d.name} (global)`;
+				if (d.unresolved) return `${d.name} (missing)`;
+				return path.basename(path.relative(PROJECT_DIR, path.normalize(d.path)));
+			});
+			console.log(`  ${fileName} → ${depNames.join(', ')}`);
+		}
+	});
+	
+	// Print tree structure
+	console.log("\n[Bundle] Full Tree:\n");
+	
+	const shown = new Set();
+	
+	function printTree(filePath, prefix = "", isLast = true) {
+		const normalized = path.normalize(filePath);
+		const relPath = path.relative(PROJECT_DIR, normalized);
+		const fileName = path.basename(relPath);
+		
+		// Print current node
+		if (prefix === "") {
+			console.log(`  ${fileName}`);
+		}
+		
+		const isCircular = circularDeps.has(normalized);
+		const wasShown = shown.has(normalized);
+		
+		if (wasShown || isCircular) {
+			return;
+		}
+		
+		shown.add(normalized);
+		
+		const deps = moduleGraph.get(normalized) || [];
+		
+		deps.forEach((dep, i) => {
+			const isLastDep = i === deps.length - 1;
+			const branch = isLastDep ? "└─ " : "├─ ";
+			const extension = isLastDep ? "   " : "│  ";
+			
+			if (dep.global) {
+				console.log(`  ${prefix}${branch}${dep.name} (global)`);
+			} else if (dep.unresolved) {
+				console.log(`  ${prefix}${branch}${dep.name} (missing)`);
+			} else if (dep.path) {
+				const depNormalized = path.normalize(dep.path);
+				const depFileName = path.basename(path.relative(PROJECT_DIR, depNormalized));
+				const depWasShown = shown.has(depNormalized);
+				
+				if (depWasShown) {
+					console.log(`  ${prefix}${branch}${depFileName} (...)`);
+				} else {
+					console.log(`  ${prefix}${branch}${depFileName}`);
+					printTree(dep.path, prefix + extension, isLastDep);
+				}
+			}
 		});
 	}
 	
-	console.log("\n[Bundle] === End Dependency Tree ===\n");
+	printTree(ENTRY_FILE);
+	
+	if (circularDeps.size > 0) {
+		console.log("\n  ⚠ Circular dependencies:");
+		circularDeps.forEach(dep => {
+			console.log(`    • ${path.relative(PROJECT_DIR, dep)}`);
+		});
+	}
+	
+	console.log("");
 }
 
 async function main() {
@@ -323,6 +377,10 @@ async function main() {
 		process.chdir(PROJECT_DIR);
 		
 		// Create temporary stub files for global modules
+		if (globalModules.length > 0) {
+			console.log(`[Bundle] Processing ${globalModules.length} global module(s)...`);
+		}
+		
 		for (const moduleName of globalModules) {
 			const modulePath = moduleName.replace(/\./g, path.sep);
 			const stubPath = path.join(PROJECT_DIR, `${modulePath}.lua`);
@@ -333,9 +391,8 @@ async function main() {
 				// Create empty stub that just returns empty table
 				await fs.writeFile(stubPath, `-- Temporary stub for global module '${moduleName}'\nreturn {}`, 'utf8');
 				stubFiles.push(stubPath);
-				console.log(`[Bundle] Created stub for global module: ${moduleName}`);
 			} catch (stubError) {
-				console.warn(`[Bundle] Failed to create stub for ${moduleName}: ${stubError.message}`);
+				console.warn(`[Bundle] ⚠️  Failed to create stub for ${moduleName}: ${stubError.message}`);
 			}
 		}
 		
@@ -375,29 +432,23 @@ async function main() {
 		for (const stubFile of stubFiles) {
 			try {
 				await fs.unlink(stubFile);
-				console.log(`[Bundle] Removed stub: ${path.relative(PROJECT_DIR, stubFile)}`);
 			} catch (cleanupError) {
-				console.warn(`[Bundle] Failed to remove stub ${stubFile}: ${cleanupError.message}`);
+				console.warn(`[Bundle] ⚠️  Cleanup failed: ${cleanupError.message}`);
 			}
 		}
 		
 		// Post-process bundle: remove global module registrations and restore runtime require()
 		if (globalModules.length > 0) {
-			console.log(`[Bundle] Restoring ${globalModules.length} global module(s) as runtime require()...`);
-			
 			for (const moduleName of globalModules) {
 				// Remove the __bundle_register call for this module
-				// Pattern: __bundle_register("moduleName", function(require, _LOADED, __bundle_register, __bundle_modules)
-				// ...
-				// end)
 				const escapedName = moduleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 				const registerPattern = new RegExp(
 					`__bundle_register\\("${escapedName}",\\s*function\\([^)]*\\)[\\s\\S]*?\\nend\\)\\s*`,
 					'g'
 				);
 				bundledLua = bundledLua.replace(registerPattern, '');
-				console.log(`[Bundle] Restored '${moduleName}' as runtime require`);
 			}
+			console.log(`[Bundle] ✓ Global modules preserved for runtime`);
 		}
 
 		const outputPath = path.join(BUILD_DIR, outputName);
