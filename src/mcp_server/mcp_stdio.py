@@ -67,6 +67,10 @@ def handle_tools_list() -> dict:
                 "inputSchema": {
                     "type": "object",
                     "properties": {
+                        "entryFile": {
+                            "type": "string",
+                            "description": "Optional entry file path (relative to workspace root). Defaults to src/Main.lua or first .lua in root"
+                        },
                         "bundleOutputDir": {
                             "type": "string",
                             "description": "Optional override for build output directory"
@@ -92,9 +96,15 @@ def _run_bundle(arguments: dict) -> dict:
         )
 
     env = os.environ.copy()
+    
+    entry_file = arguments.get("entryFile")
+    if entry_file:
+        env["ENTRY_FILE"] = str(Path(entry_file).expanduser())
+    
     bundle_output_dir = arguments.get("bundleOutputDir")
     if bundle_output_dir:
         env["BUNDLE_OUTPUT_DIR"] = str(Path(bundle_output_dir).expanduser())
+    
     deploy_dir = arguments.get("deployDir")
     if deploy_dir:
         env["DEPLOY_DIR"] = str(Path(deploy_dir).expanduser())
