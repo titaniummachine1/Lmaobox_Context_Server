@@ -63,25 +63,25 @@ def handle_tools_list() -> dict:
             },
             {
                 "name": "bundle",
-                "description": "Bundle and deploy Lua to the LocalAppData lua folder",
+                "description": "Bundle and deploy Lua to %LOCALAPPDATA%/lua. USAGE: Provide path to folder containing Main.lua. That folder IS the bundle root - all require() calls resolve from there. Example: projectDir='test_bundle/src' if Main.lua is in test_bundle/src/Main.lua",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "projectDir": {
                             "type": "string",
-                            "description": "Directory containing Lua files (e.g., 'test_bundle', 'prototypes'). Required."
+                            "description": "Path to folder containing Main.lua (relative to workspace root). This folder becomes the bundle root. MUST contain Main.lua. Example: 'prototypes' or 'test_bundle/src'"
                         },
                         "entryFile": {
                             "type": "string",
-                            "description": "Entry file name (e.g., 'Main.lua', 'my_script.lua'). Optional. Defaults to Main.lua (case-insensitive). If not Main.lua, only that file will be deployed (no bundling)."
+                            "description": "Entry file name only (not path). Defaults to Main.lua (case-insensitive). If not Main.lua, only that file deploys (no bundling)."
                         },
                         "bundleOutputDir": {
                             "type": "string",
-                            "description": "Optional override for build output directory"
+                            "description": "Override for build output (advanced use only)"
                         },
                         "deployDir": {
                             "type": "string",
-                            "description": "Optional override for deployment directory (defaults to %LOCALAPPDATA%/lua)"
+                            "description": "Override deployment target (advanced use only, defaults to %LOCALAPPDATA%/lua)"
                         }
                     },
                     "required": ["projectDir"]
