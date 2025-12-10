@@ -130,6 +130,29 @@ async function resolveModulePath(moduleName, searchPaths) {
 	return null;
 }
 
+async function isGlobalModule(moduleName) {
+	// Check if module exists in global lua directory (runtime accessible)
+	const globalLuaDir = resolveDeployDir();
+	const modulePath = moduleName.replace(/\./g, path.sep);
+	
+	const candidates = [
+		path.join(globalLuaDir, `${modulePath}.lua`),
+		path.join(globalLuaDir, modulePath, "init.lua"),
+	];
+	
+	for (const candidate of candidates) {
+		try {
+			const stats = await fs.stat(candidate);
+			if (stats.isFile()) {
+				return true;
+			}
+		} catch {
+			continue;
+		}
+	}
+	return false;
+}
+
 async function buildDependencyTree(entryFile, searchPaths, visited = new Set(), stack = new Set()) {
 	const normalizedEntry = path.normalize(entryFile);
 	
@@ -159,10 +182,13 @@ async function buildDependencyTree(entryFile, searchPaths, visited = new Set(), 
 
 			await buildDependencyTree(modulePath, searchPaths, visited, stack);
 		} else {
+			// Check if it's a global module (exists in runtime lua directory)
+			const isGlobal = await isGlobalModule(moduleName);
 			dependencies.push({
 				name: moduleName,
 				path: null,
-				unresolved: true,
+				unresolved: !isGlobal,
+				global: isGlobal,
 			});
 		}
 	}
@@ -196,7 +222,9 @@ function printDependencyTree() {
 			const connector = isLast ? "└─" : "├─";
 			const childIndent = indent + 2;
 			
-			if (dep.unresolved) {
+			if (dep.global) {
+				console.log(`${" ".repeat(childIndent)}${connector}${dep.name} [GLOBAL - runtime require]`);
+			} else if (dep.unresolved) {
 				console.log(`${" ".repeat(childIndent)}${connector}${dep.name} [UNRESOLVED]`);
 			} else if (dep.path) {
 				printNode(dep.path, childIndent, connector);
@@ -245,7 +273,7 @@ async function main() {
 			try {
 				bundle(ENTRY_FILENAME, {
 					metadata: false,
-					paths: ["."],
+					paths: ["./?.lua", "./?/init.lua"],
 				});
 				console.log(`[Bundle] ✓ Syntax valid`);
 			} catch (syntaxError) {
@@ -272,14 +300,51 @@ async function main() {
 	// Bundle Main.lua with dependencies
 	const prevCwd = process.cwd();
 	
+	// Collect all global modules that need stub files for bundling
+	const globalModules = [];
+	const stubFiles = [];
+	
+	function collectGlobalModules(filePath) {
+		const normalizedPath = path.normalize(filePath);
+		const deps = moduleGraph.get(normalizedPath) || [];
+		
+		for (const dep of deps) {
+			if (dep.global) {
+				globalModules.push(dep.name);
+			} else if (dep.path) {
+				collectGlobalModules(dep.path);
+			}
+		}
+	}
+	
+	collectGlobalModules(ENTRY_FILE);
+	
 	try {
 		process.chdir(PROJECT_DIR);
+		
+		// Create temporary stub files for global modules
+		for (const moduleName of globalModules) {
+			const modulePath = moduleName.replace(/\./g, path.sep);
+			const stubPath = path.join(PROJECT_DIR, `${modulePath}.lua`);
+			const stubDir = path.dirname(stubPath);
+			
+			try {
+				await fs.mkdir(stubDir, { recursive: true });
+				// Create empty stub that just returns empty table
+				await fs.writeFile(stubPath, `-- Temporary stub for global module '${moduleName}'\nreturn {}`, 'utf8');
+				stubFiles.push(stubPath);
+				console.log(`[Bundle] Created stub for global module: ${moduleName}`);
+			} catch (stubError) {
+				console.warn(`[Bundle] Failed to create stub for ${moduleName}: ${stubError.message}`);
+			}
+		}
 		
 		let bundledLua;
 		try {
 			bundledLua = bundle(ENTRY_FILENAME, {
 				metadata: false,
-				paths: ["."],
+				paths: ["./?.lua", "./?/init.lua"],
+				force: false,
 				expressionHandler: (module, expression) => {
 					if (expression?.loc?.start) {
 						const start = expression.loc.start;
@@ -304,6 +369,35 @@ async function main() {
 				`  3. Required modules exist in the project directory\n` +
 				`\nOriginal error: ${bundleError.stack || bundleError.message}`
 			);
+		}
+		
+		// Clean up stub files
+		for (const stubFile of stubFiles) {
+			try {
+				await fs.unlink(stubFile);
+				console.log(`[Bundle] Removed stub: ${path.relative(PROJECT_DIR, stubFile)}`);
+			} catch (cleanupError) {
+				console.warn(`[Bundle] Failed to remove stub ${stubFile}: ${cleanupError.message}`);
+			}
+		}
+		
+		// Post-process bundle: remove global module registrations and restore runtime require()
+		if (globalModules.length > 0) {
+			console.log(`[Bundle] Restoring ${globalModules.length} global module(s) as runtime require()...`);
+			
+			for (const moduleName of globalModules) {
+				// Remove the __bundle_register call for this module
+				// Pattern: __bundle_register("moduleName", function(require, _LOADED, __bundle_register, __bundle_modules)
+				// ...
+				// end)
+				const escapedName = moduleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+				const registerPattern = new RegExp(
+					`__bundle_register\\("${escapedName}",\\s*function\\([^)]*\\)[\\s\\S]*?\\nend\\)\\s*`,
+					'g'
+				);
+				bundledLua = bundledLua.replace(registerPattern, '');
+				console.log(`[Bundle] Restored '${moduleName}' as runtime require`);
+			}
 		}
 
 		const outputPath = path.join(BUILD_DIR, outputName);
