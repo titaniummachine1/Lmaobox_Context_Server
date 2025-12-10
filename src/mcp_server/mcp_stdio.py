@@ -69,7 +69,11 @@ def handle_tools_list() -> dict:
                     "properties": {
                         "projectDir": {
                             "type": "string",
-                            "description": "Directory containing Main.lua (e.g., 'test_bundle', 'my_project'). Required."
+                            "description": "Directory containing Lua files (e.g., 'test_bundle', 'prototypes'). Required."
+                        },
+                        "entryFile": {
+                            "type": "string",
+                            "description": "Entry file name (e.g., 'Main.lua', 'my_script.lua'). Optional. Defaults to Main.lua (case-insensitive). If not Main.lua, only that file will be deployed (no bundling)."
                         },
                         "bundleOutputDir": {
                             "type": "string",
@@ -91,7 +95,7 @@ def _run_bundle(arguments: dict) -> dict:
     """Run the bundle-and-deploy automation and return its output."""
     project_dir = arguments.get("projectDir")
     if not project_dir:
-        raise ValueError("projectDir is required. Specify directory containing Main.lua (e.g., 'test_bundle')")
+        raise ValueError("projectDir is required. Specify directory containing Lua files (e.g., 'test_bundle')")
     
     repo_root = Path(__file__).resolve().parents[2]
     script_path = repo_root / "automations" / "bundle-and-deploy.js"
@@ -102,6 +106,10 @@ def _run_bundle(arguments: dict) -> dict:
 
     env = os.environ.copy()
     env["PROJECT_DIR"] = str(Path(project_dir).expanduser())
+    
+    entry_file = arguments.get("entryFile")
+    if entry_file:
+        env["ENTRY_FILE"] = str(entry_file)
     
     bundle_output_dir = arguments.get("bundleOutputDir")
     if bundle_output_dir:

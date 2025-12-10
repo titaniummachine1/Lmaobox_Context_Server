@@ -3,19 +3,45 @@ import { promises as fs, existsSync, readdirSync } from "fs";
 import path from "path";
 import os from "os";
 
-// Get directory from CLI arg or env var
+// Get directory and optional entry file from CLI args or env vars
 const cliDir = process.argv[2];
+const cliEntry = process.argv[3];
 const envDir = process.env.PROJECT_DIR;
+const envEntry = process.env.ENTRY_FILE;
 
 if (!cliDir && !envDir) {
 	console.error("[Bundle] ERROR: No project directory specified.");
-	console.error("[Bundle] Usage: node bundle-and-deploy.js <path/to/lua/project>");
-	console.error("[Bundle] Or set PROJECT_DIR environment variable.");
+	console.error("[Bundle] Usage: node bundle-and-deploy.js <path/to/lua/project> [entryFile.lua]");
+	console.error("[Bundle] Or set PROJECT_DIR and optionally ENTRY_FILE environment variables.");
+	console.error("[Bundle] Example: node bundle-and-deploy.js my_project Main.lua");
+	console.error("[Bundle] If entryFile is not Main.lua (case-insensitive), only that file will be deployed (no bundling).");
 	process.exit(1);
 }
 
 const PROJECT_DIR = path.resolve(cliDir || envDir);
-const ENTRY_FILE = path.join(PROJECT_DIR, "Main.lua");
+
+// Entry file: specified by user or find Main.lua (case-insensitive)
+function findEntryFile() {
+	const specified = cliEntry || envEntry;
+	if (specified) {
+		return specified;
+	}
+	
+	// Auto-find Main.lua (case-insensitive)
+	if (existsSync(PROJECT_DIR)) {
+		const files = readdirSync(PROJECT_DIR);
+		const mainFile = files.find(f => f.toLowerCase() === "main.lua");
+		if (mainFile) {
+			return mainFile;
+		}
+	}
+	
+	return "Main.lua"; // fallback
+}
+
+const ENTRY_FILENAME = findEntryFile();
+const ENTRY_FILE = path.join(PROJECT_DIR, ENTRY_FILENAME);
+const IS_MAIN = ENTRY_FILENAME.toLowerCase() === "main.lua";
 const BUILD_DIR = process.env.BUNDLE_OUTPUT_DIR 
 	? path.resolve(process.env.BUNDLE_OUTPUT_DIR)
 	: path.join(PROJECT_DIR, "build");
@@ -192,7 +218,12 @@ function printDependencyTree() {
 
 async function main() {
 	console.log(`[Bundle] Project directory: ${PROJECT_DIR}`);
-	console.log(`[Bundle] Entry: ${ENTRY_FILE}`);
+	console.log(`[Bundle] Entry file: ${ENTRY_FILENAME}`);
+	
+	if (!IS_MAIN) {
+		console.log(`[Bundle] ⚠️  Entry file is not Main.lua (case-insensitive)`);
+		console.log(`[Bundle] Mode: Single-file deployment (no bundling)`);
+	}
 
 	await ensureEntryExists();
 	const outputName = await readOutputName();
@@ -203,7 +234,42 @@ async function main() {
 	await buildDependencyTree(ENTRY_FILE, [PROJECT_DIR]);
 	printDependencyTree();
 
-	// Bundle from project directory
+	// If not Main.lua, just validate syntax and deploy single file
+	if (!IS_MAIN) {
+		console.log(`[Bundle] Validating Lua syntax...`);
+		const prevCwd = process.cwd();
+		try {
+			process.chdir(PROJECT_DIR);
+			
+			// Try to parse with luabundle (syntax check)
+			try {
+				bundle(ENTRY_FILENAME, {
+					metadata: false,
+					paths: ["."],
+				});
+				console.log(`[Bundle] ✓ Syntax valid`);
+			} catch (syntaxError) {
+				throw new Error(
+					`Lua syntax error in ${ENTRY_FILENAME}:\n` +
+					`${syntaxError.message}\n\n` +
+					`Fix syntax errors before deployment.`
+				);
+			}
+			
+			// Deploy single file directly
+			const content = await fs.readFile(ENTRY_FILE, "utf8");
+			const deployDir = resolveDeployDir();
+			const deployPath = path.join(deployDir, ENTRY_FILENAME);
+			await fs.mkdir(deployDir, { recursive: true });
+			await fs.writeFile(deployPath, content, "utf8");
+			console.log(`[Bundle] ✓ Deployed single file: ${deployPath}`);
+			return;
+		} finally {
+			process.chdir(prevCwd);
+		}
+	}
+
+	// Bundle Main.lua with dependencies
 	const prevCwd = process.cwd();
 	
 	try {
@@ -211,7 +277,7 @@ async function main() {
 		
 		let bundledLua;
 		try {
-			bundledLua = bundle("Main.lua", {
+			bundledLua = bundle(ENTRY_FILENAME, {
 				metadata: false,
 				paths: ["."],
 				expressionHandler: (module, expression) => {
@@ -231,9 +297,9 @@ async function main() {
 			throw new Error(
 				`Bundling failed: ${bundleError.message}\n` +
 				`\nProject directory: ${PROJECT_DIR}\n` +
-				`Entry file: Main.lua\n` +
+				`Entry file: ${ENTRY_FILENAME}\n` +
 				`\nMake sure:\n` +
-				`  1. Main.lua exists in project directory\n` +
+				`  1. ${ENTRY_FILENAME} exists in project directory\n` +
 				`  2. All require() statements use valid module paths\n` +
 				`  3. Required modules exist in the project directory\n` +
 				`\nOriginal error: ${bundleError.stack || bundleError.message}`
@@ -242,7 +308,7 @@ async function main() {
 
 		const outputPath = path.join(BUILD_DIR, outputName);
 		await writeBundle(outputPath, bundledLua);
-		console.log(`[Bundle] ✓ Created: ${outputPath}`);
+		console.log(`[Bundle] ✓ Bundle created: ${outputPath}`);
 
 		const deployDir = resolveDeployDir();
 		const deployPath = path.join(deployDir, outputName);
