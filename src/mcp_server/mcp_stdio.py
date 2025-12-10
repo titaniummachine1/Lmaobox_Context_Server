@@ -67,9 +67,9 @@ def handle_tools_list() -> dict:
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "entryFile": {
+                        "projectDir": {
                             "type": "string",
-                            "description": "Optional entry file path (relative to workspace root). Defaults to src/Main.lua or first .lua in root"
+                            "description": "Directory containing Main.lua (e.g., 'test_bundle', 'my_project'). Required."
                         },
                         "bundleOutputDir": {
                             "type": "string",
@@ -79,7 +79,8 @@ def handle_tools_list() -> dict:
                             "type": "string",
                             "description": "Optional override for deployment directory (defaults to %LOCALAPPDATA%/lua)"
                         }
-                    }
+                    },
+                    "required": ["projectDir"]
                 }
             }
         ]
@@ -88,6 +89,10 @@ def handle_tools_list() -> dict:
 
 def _run_bundle(arguments: dict) -> dict:
     """Run the bundle-and-deploy automation and return its output."""
+    project_dir = arguments.get("projectDir")
+    if not project_dir:
+        raise ValueError("projectDir is required. Specify directory containing Main.lua (e.g., 'test_bundle')")
+    
     repo_root = Path(__file__).resolve().parents[2]
     script_path = repo_root / "automations" / "bundle-and-deploy.js"
     if not script_path.exists():
@@ -96,10 +101,7 @@ def _run_bundle(arguments: dict) -> dict:
         )
 
     env = os.environ.copy()
-    
-    entry_file = arguments.get("entryFile")
-    if entry_file:
-        env["ENTRY_FILE"] = str(Path(entry_file).expanduser())
+    env["PROJECT_DIR"] = str(Path(project_dir).expanduser())
     
     bundle_output_dir = arguments.get("bundleOutputDir")
     if bundle_output_dir:
@@ -119,8 +121,7 @@ def _run_bundle(arguments: dict) -> dict:
     )
 
     result = {
-        "workspace_root": str(repo_root),
-        "script": str(script_path),
+        "project_dir": env.get("PROJECT_DIR"),
         "bundle_output_dir": env.get("BUNDLE_OUTPUT_DIR"),
         "deploy_dir": env.get("DEPLOY_DIR"),
         "stdout": process.stdout.strip(),
@@ -131,9 +132,9 @@ def _run_bundle(arguments: dict) -> dict:
     if process.returncode != 0:
         raise RuntimeError(
             f"Bundle failed (exit {process.returncode}).\n"
-            f"workspace: {result['workspace_root']}\n"
-            f"bundle_output_dir: {result['bundle_output_dir'] or ''}\n"
-            f"deploy_dir: {result['deploy_dir'] or ''}\n"
+            f"project_dir: {result['project_dir']}\n"
+            f"bundle_output_dir: {result['bundle_output_dir'] or '<default>'}\n"
+            f"deploy_dir: {result['deploy_dir'] or '<default>'}\n"
             f"stdout:\n{result['stdout'] or '<empty>'}\n"
             f"stderr:\n{result['stderr'] or '<empty>'}"
         )
@@ -168,16 +169,15 @@ def handle_tools_call(name: str, arguments: dict) -> dict:
     elif name == "bundle":
         result = _run_bundle(arguments)
         output_lines = [
-            f"workspace: {result['workspace_root']}",
-            f"bundle_output_dir: {result['bundle_output_dir'] or '<default build>'}",
+            f"project_dir: {result['project_dir']}",
+            f"bundle_output_dir: {result['bundle_output_dir'] or '<default>'}",
             f"deploy_dir: {result['deploy_dir'] or '<default LocalAppData/lua>'}",
-            f"script: {result['script']}",
             f"exit_code: {result['exit_code']}",
-            "---- stdout ----",
-            result["stdout"] or "<empty>",
-            "---- stderr ----",
-            result["stderr"] or "<empty>",
+            "",
+            result["stdout"] or "<no output>",
         ]
+        if result["stderr"]:
+            output_lines.extend(["", "=== stderr ===", result["stderr"]])
         return {"content": [{"type": "text", "text": "\n".join(output_lines)}]}
 
     else:

@@ -3,44 +3,22 @@ import { promises as fs, existsSync, readdirSync } from "fs";
 import path from "path";
 import os from "os";
 
-const WORKSPACE_ROOT = process.cwd();
+// Get directory from CLI arg or env var
+const cliDir = process.argv[2];
+const envDir = process.env.PROJECT_DIR;
 
-// Allow override via env var or CLI arg (e.g., ENTRY_FILE=path/to/file.lua)
-function resolveEntryFile() {
-	const envEntry = process.env.ENTRY_FILE;
-	const cliEntry = process.argv[2];
-	
-	if (cliEntry) {
-		return path.resolve(WORKSPACE_ROOT, cliEntry);
-	}
-	if (envEntry) {
-		return path.resolve(WORKSPACE_ROOT, envEntry);
-	}
-	
-	// Default: try src/Main.lua, fallback to any .lua in workspace root
-	const defaultEntry = path.resolve(WORKSPACE_ROOT, "src", "Main.lua");
-	if (existsSync(defaultEntry)) {
-		return defaultEntry;
-	}
-	
-	// Look for any .lua file in root as fallback
-	const rootLuaFiles = readdirSync(WORKSPACE_ROOT)
-		.filter(f => f.endsWith(".lua"));
-	if (rootLuaFiles.length > 0) {
-		return path.resolve(WORKSPACE_ROOT, rootLuaFiles[0]);
-	}
-	
-	// Return default anyway, will fail gracefully
-	return defaultEntry;
+if (!cliDir && !envDir) {
+	console.error("[Bundle] ERROR: No project directory specified.");
+	console.error("[Bundle] Usage: node bundle-and-deploy.js <path/to/lua/project>");
+	console.error("[Bundle] Or set PROJECT_DIR environment variable.");
+	process.exit(1);
 }
 
-const ENTRY_FILE = resolveEntryFile();
-const BUILD_DIR = path.resolve(
-	process.env.BUNDLE_OUTPUT_DIR
-		? path.resolve(process.env.BUNDLE_OUTPUT_DIR)
-		: path.join(WORKSPACE_ROOT, "build"),
-);
-const TITLE_FILE = path.resolve(WORKSPACE_ROOT, "automations", "title.txt");
+const PROJECT_DIR = path.resolve(cliDir || envDir);
+const ENTRY_FILE = path.join(PROJECT_DIR, "Main.lua");
+const BUILD_DIR = process.env.BUNDLE_OUTPUT_DIR 
+	? path.resolve(process.env.BUNDLE_OUTPUT_DIR)
+	: path.join(PROJECT_DIR, "build");
 
 // Track module dependency tree
 const moduleGraph = new Map();
@@ -58,22 +36,11 @@ function resolveDeployDir() {
 }
 
 async function readOutputName() {
-	// Default: use workspace folder name as bundle name
-	const workspaceName = path.basename(WORKSPACE_ROOT);
-	let outputName = `${workspaceName}.lua`;
-	let source = "workspace folder name (fallback)";
+	// Default: use project directory name
+	const projectName = path.basename(PROJECT_DIR);
+	let outputName = `${projectName}.lua`;
 	
-	try {
-		const titleContents = (await fs.readFile(TITLE_FILE, "utf8")).trim();
-		if (titleContents.length > 0) {
-			outputName = titleContents.endsWith(".lua") ? titleContents : `${titleContents}.lua`;
-			source = `title.txt (${path.relative(WORKSPACE_ROOT, TITLE_FILE)})`;
-		}
-	} catch {
-		// Missing title.txt is fine; use workspace name fallback.
-	}
-	
-	console.log(`[Bundle] Output name: "${outputName}" from ${source}`);
+	console.log(`[Bundle] Output name: "${outputName}"`);
 	return outputName;
 }
 
@@ -185,7 +152,7 @@ function printDependencyTree() {
 	
 	function printNode(filePath, indent = 0, prefix = "") {
 		const normalizedPath = path.normalize(filePath);
-		const relativePath = path.relative(WORKSPACE_ROOT, normalizedPath);
+		const relativePath = path.relative(PROJECT_DIR, normalizedPath);
 		const isCircular = circularDeps.has(normalizedPath);
 		const marker = isCircular ? " [CIRCULAR]" : "";
 		
@@ -216,7 +183,7 @@ function printDependencyTree() {
 	if (circularDeps.size > 0) {
 		console.log("\n[Bundle] ⚠️  Circular dependencies detected:");
 		circularDeps.forEach(dep => {
-			console.log(`  - ${path.relative(WORKSPACE_ROOT, dep)}`);
+			console.log(`  - ${path.relative(PROJECT_DIR, dep)}`);
 		});
 	}
 	
@@ -224,69 +191,75 @@ function printDependencyTree() {
 }
 
 async function main() {
-	console.log(`[Bundle] Working directory: ${WORKSPACE_ROOT}`);
+	console.log(`[Bundle] Project directory: ${PROJECT_DIR}`);
 	console.log(`[Bundle] Entry: ${ENTRY_FILE}`);
 
 	await ensureEntryExists();
-
 	const outputName = await readOutputName();
 	await fs.mkdir(BUILD_DIR, { recursive: true });
 
-	// Detect if entry is in src/ structure or standalone
-	const entryDir = path.dirname(ENTRY_FILE);
-	const isInSrc = entryDir.includes(path.join(WORKSPACE_ROOT, "src"));
-	
-	let bundlePaths;
-	if (isInSrc) {
-		// Project has src/ structure: search src/ first, then root
-		console.log("[Bundle] Mode: Structured project (src/ detected)");
-		bundlePaths = [
-			path.join(WORKSPACE_ROOT, "src"),
-			WORKSPACE_ROOT
-		];
-	} else {
-		// Standalone file or flat structure: search entry dir and workspace root
-		console.log("[Bundle] Mode: Standalone file (no src/ structure)");
-		bundlePaths = [
-			entryDir,
-			WORKSPACE_ROOT
-		];
-	}
-
-	// Build dependency tree before bundling
+	// Build dependency tree (for AI visibility)
 	console.log("[Bundle] Analyzing dependencies...");
-	await buildDependencyTree(ENTRY_FILE, bundlePaths);
+	await buildDependencyTree(ENTRY_FILE, [PROJECT_DIR]);
 	printDependencyTree();
 
-	const bundledLua = bundle(ENTRY_FILE, {
-		metadata: false,
-		paths: bundlePaths,
-		expressionHandler: (module, expression) => {
-			if (expression?.loc?.start) {
-				const start = expression.loc.start;
-				console.warn(
-					`WARNING: Non-literal require in '${module.name}' at ${start.line}:${start.column}`,
-				);
-			} else {
-				console.warn(
-					`WARNING: Non-literal require in '${module.name}' at unknown location`,
-				);
-			}
-		},
-	});
+	// Bundle from project directory
+	const prevCwd = process.cwd();
+	
+	try {
+		process.chdir(PROJECT_DIR);
+		
+		let bundledLua;
+		try {
+			bundledLua = bundle("Main.lua", {
+				metadata: false,
+				paths: ["."],
+				expressionHandler: (module, expression) => {
+					if (expression?.loc?.start) {
+						const start = expression.loc.start;
+						console.warn(
+							`⚠️  Non-literal require in '${module.name}' at ${start.line}:${start.column}`,
+						);
+					} else {
+						console.warn(
+							`⚠️  Non-literal require in '${module.name}' at unknown location`,
+						);
+					}
+				},
+			});
+		} catch (bundleError) {
+			throw new Error(
+				`Bundling failed: ${bundleError.message}\n` +
+				`\nProject directory: ${PROJECT_DIR}\n` +
+				`Entry file: Main.lua\n` +
+				`\nMake sure:\n` +
+				`  1. Main.lua exists in project directory\n` +
+				`  2. All require() statements use valid module paths\n` +
+				`  3. Required modules exist in the project directory\n` +
+				`\nOriginal error: ${bundleError.stack || bundleError.message}`
+			);
+		}
 
-	const outputPath = path.join(BUILD_DIR, outputName);
-	await writeBundle(outputPath, bundledLua);
-	console.log(`[Bundle] Library created at ${outputPath}`);
+		const outputPath = path.join(BUILD_DIR, outputName);
+		await writeBundle(outputPath, bundledLua);
+		console.log(`[Bundle] ✓ Created: ${outputPath}`);
 
-	const deployDir = resolveDeployDir();
-	const deployPath = path.join(deployDir, outputName);
-	await deployBundle(outputPath, deployPath);
-	console.log(`[Bundle] Deployed to ${deployPath}`);
+		const deployDir = resolveDeployDir();
+		const deployPath = path.join(deployDir, outputName);
+		await deployBundle(outputPath, deployPath);
+		console.log(`[Bundle] ✓ Deployed: ${deployPath}`);
+	} finally {
+		process.chdir(prevCwd);
+	}
 }
 
 main().catch((error) => {
-	console.error(`[Bundle] Failed: ${error.message}`);
+	console.error("\n[Bundle] ❌ FAILED");
+	console.error("Error:", error.message);
+	if (error.stack) {
+		console.error("\nStack trace:");
+		console.error(error.stack);
+	}
 	process.exit(1);
 });
 
