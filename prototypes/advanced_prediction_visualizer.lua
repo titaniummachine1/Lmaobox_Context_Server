@@ -149,6 +149,16 @@ local function PushRecentDirection(idx, dirIndex)
 	end
 
 	directionEntropy[idx] = CalculateEntropyFromHistory(history)
+
+	-- Reset Markov confidence on entropy changes (pattern switches)
+	local prevEntropy = directionEntropy[idx] or 0
+	local currentEntropy = directionEntropy[idx]
+	if currentEntropy and math.abs(currentEntropy - prevEntropy) > 1.0 then
+		-- Entropy spike/drop indicates pattern change, reset learning
+		markovTables[idx] = nil
+		recentDirections[idx] = nil
+		deltaHistory[idx] = nil
+	end
 end
 
 local function PushDelta(idx, delta)
@@ -476,6 +486,14 @@ local function UpdateTracking(entity, cmd)
 			local delta = (currentWishdirIndex - lastWishdirIndex[idx]) % 8
 			if delta > 4 then delta = delta - 8 end -- normalize to [-4,4]
 			PushDelta(idx, delta)
+
+			-- Kill rotation hypothesis immediately on contradiction
+			if deltaHistory[idx] then
+				-- If delta is near zero or player holds same dir, rotation is dead
+				if math.abs(delta) <= 0.1 or currentWishdirIndex == lastWishdirIndex[idx] then
+					deltaHistory[idx] = {}
+				end
+			end
 
 			-- Optional: raw timing histogram
 			if ticksHeld and ticksHeld > 0 then
@@ -849,10 +867,37 @@ local function PredictPath(player, ticks, wishdir)
 			currentWishdir = ApplyWishdirOffset(currentYaw, wishdirRelativeAngle)
 		else
 			-- Enemies: predict wishdir changes in relative coordinate system
+
+			-- HARD CORRECTION: if current velocity disagrees with predicted dir, override
+			if currentVel:LengthSqr() > 100 then
+				local velDir = GetWishdirIndexFromVelocity(currentVel, currentYaw)
+				if velDir and velDir ~= currentWishdirIndex then
+					currentWishdirIndex = velDir
+					ticksSinceWishdirChange = 0
+					if simulatedHistory then
+						simulatedHistory[#simulatedHistory + 1] = velDir
+						if #simulatedHistory > RECENT_HISTORY_SIZE then
+							table.remove(simulatedHistory, 1)
+						end
+					else
+						simulatedHistory = { velDir }
+					end
+				end
+			end
+
 			ticksSinceWishdirChange = ticksSinceWishdirChange + 1
 
-			-- Check if it's time to change direction (binary update rate)
-			if ticksSinceWishdirChange >= wishdirUpdateRate then
+			-- Allow immediate change if yaw rate indicates active steering
+			local effectiveRate = wishdirUpdateRate
+			if math.abs(yawRotationPerTick) > 5 then
+				effectiveRate = 1 -- Player is actively steering, reduce wishdir inertia
+			end
+
+			-- Probabilistic update instead of hard timer
+			local changeProb = 1 / math.max(1, effectiveRate)
+			local shouldChange = math.random() < changeProb or ticksSinceWishdirChange >= effectiveRate
+
+			if shouldChange then
 				local predictedDir
 
 				-- First priority: continuous rotation detection

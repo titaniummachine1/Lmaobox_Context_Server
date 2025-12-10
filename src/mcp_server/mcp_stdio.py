@@ -2,7 +2,10 @@
 """MCP stdio server - speaks JSON-RPC protocol over stdin/stdout."""
 import json
 import logging
+import os
+import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from .server import get_smart_context, get_types
@@ -57,9 +60,75 @@ def handle_tools_list() -> dict:
                     },
                     "required": ["symbol"]
                 }
+            },
+            {
+                "name": "bundle",
+                "description": "Bundle and deploy Lua to the LocalAppData lua folder",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "bundleOutputDir": {
+                            "type": "string",
+                            "description": "Optional override for build output directory"
+                        },
+                        "deployDir": {
+                            "type": "string",
+                            "description": "Optional override for deployment directory (defaults to %LOCALAPPDATA%/lua)"
+                        }
+                    }
+                }
             }
         ]
     }
+
+
+def _run_bundle(arguments: dict) -> dict:
+    """Run the bundle-and-deploy automation and return its output."""
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "automations" / "bundle-and-deploy.js"
+    if not script_path.exists():
+        raise FileNotFoundError(
+            f"bundle script missing: {script_path}. Ensure automations are installed."
+        )
+
+    env = os.environ.copy()
+    bundle_output_dir = arguments.get("bundleOutputDir")
+    if bundle_output_dir:
+        env["BUNDLE_OUTPUT_DIR"] = str(Path(bundle_output_dir).expanduser())
+    deploy_dir = arguments.get("deployDir")
+    if deploy_dir:
+        env["DEPLOY_DIR"] = str(Path(deploy_dir).expanduser())
+
+    process = subprocess.run(
+        ["node", str(script_path)],
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    result = {
+        "workspace_root": str(repo_root),
+        "script": str(script_path),
+        "bundle_output_dir": env.get("BUNDLE_OUTPUT_DIR"),
+        "deploy_dir": env.get("DEPLOY_DIR"),
+        "stdout": process.stdout.strip(),
+        "stderr": process.stderr.strip(),
+        "exit_code": process.returncode,
+    }
+
+    if process.returncode != 0:
+        raise RuntimeError(
+            f"Bundle failed (exit {process.returncode}).\n"
+            f"workspace: {result['workspace_root']}\n"
+            f"bundle_output_dir: {result['bundle_output_dir'] or ''}\n"
+            f"deploy_dir: {result['deploy_dir'] or ''}\n"
+            f"stdout:\n{result['stdout'] or '<empty>'}\n"
+            f"stderr:\n{result['stderr'] or '<empty>'}"
+        )
+
+    return result
 
 
 def handle_tools_call(name: str, arguments: dict) -> dict:
@@ -85,6 +154,21 @@ def handle_tools_call(name: str, arguments: dict) -> dict:
         suggestion_text = f"Did you mean: {did_you_mean}\n\nSuggestions:\n" + "\n".join(
             suggestions) if did_you_mean else "No smart context found. Suggestions:\n" + "\n".join(suggestions)
         return {"content": [{"type": "text", "text": suggestion_text}]}
+
+    elif name == "bundle":
+        result = _run_bundle(arguments)
+        output_lines = [
+            f"workspace: {result['workspace_root']}",
+            f"bundle_output_dir: {result['bundle_output_dir'] or '<default build>'}",
+            f"deploy_dir: {result['deploy_dir'] or '<default LocalAppData/lua>'}",
+            f"script: {result['script']}",
+            f"exit_code: {result['exit_code']}",
+            "---- stdout ----",
+            result["stdout"] or "<empty>",
+            "---- stderr ----",
+            result["stderr"] or "<empty>",
+        ]
+        return {"content": [{"type": "text", "text": "\n".join(output_lines)}]}
 
     else:
         raise ValueError(f"Unknown tool: {name}")
