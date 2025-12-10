@@ -27,7 +27,7 @@ function findEntryFile() {
 		return specified;
 	}
 	
-	// Auto-find Main.lua (case-insensitive)
+	// Auto-find Main.lua (case-insensitive) in the project directory root
 	if (existsSync(PROJECT_DIR)) {
 		const files = readdirSync(PROJECT_DIR);
 		const mainFile = files.find(f => f.toLowerCase() === "main.lua");
