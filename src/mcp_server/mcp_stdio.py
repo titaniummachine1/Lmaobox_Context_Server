@@ -63,13 +63,13 @@ def handle_tools_list() -> dict:
             },
             {
                 "name": "bundle",
-                "description": "Bundle and deploy Lua to %LOCALAPPDATA%/lua. USAGE: Provide path to folder containing Main.lua. That folder IS the bundle root - all require() calls resolve from there. Works with any workspace, not just this repo.",
+                "description": "Bundle and deploy Lua to %LOCALAPPDATA%/lua. ⚠️ BLOCKS for up to 10 seconds. USAGE: Provide path to folder containing Main.lua. That folder IS the bundle root - all require() calls resolve from there. Relative paths resolve from MCP server launch directory (Path.cwd()). Requires MCP server installation with automations/bundle-and-deploy.js and node_modules.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "projectDir": {
                             "type": "string",
-                            "description": "Path to folder containing Main.lua. Can be absolute (C:/my_project) or relative to workspace (my_project/src). This folder becomes the bundle root. MUST contain Main.lua unless entryFile is specified."
+                            "description": "Path to folder containing Main.lua. ABSOLUTE paths recommended (C:/my_project). Relative paths resolve from MCP server launch CWD, NOT active workspace. This folder becomes the bundle root. MUST contain Main.lua unless entryFile is specified."
                         },
                         "entryFile": {
                             "type": "string",
@@ -101,7 +101,7 @@ def _run_bundle(arguments: dict) -> dict:
     # Resolve project_dir: if absolute, use as-is; if relative, resolve from CWD
     project_path = Path(project_dir).expanduser()
     if not project_path.is_absolute():
-        # Try relative to current working directory (Cursor workspace)
+        # WARNING: Path.cwd() is where MCP server was launched, not active workspace
         project_path = Path.cwd() / project_path
 
     project_path = project_path.resolve()

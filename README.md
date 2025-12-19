@@ -59,8 +59,16 @@ Defaults: `127.0.0.1:8765`. Configure via env:
 
 - `get_types(symbol)` - Get type information for a Lmaobox Lua API symbol
   - Reads SQLite `symbol_metadata`; falls back to scanning `types/` for a signature and caches it.
+  - ✅ Fast, non-blocking
 - `get_smart_context(symbol)` - Get curated smart context for a symbol
   - Nearest-definition search in `data/smart_context/` (e.g., `Foo.Bar.Baz.md`, `Foo.Bar.md`, `Foo.md`), then fuzzy `*symbol*.md`.
+  - ✅ Fast, non-blocking
+- `bundle(projectDir, entryFile?, bundleOutputDir?, deployDir?)` - Bundle and deploy Lua projects
+  - ⚠️ **BLOCKS AI for up to 10 seconds** during execution
+  - ⚠️ **Requires absolute paths** - relative paths resolve from MCP server launch CWD, not active workspace
+  - ⚠️ **Requires MCP server installation** with `automations/bundle-and-deploy.js` and node_modules
+  - Bundles Main.lua and dependencies, deploys to `%LOCALAPPDATA%/lua`
+  - Use absolute paths like `C:/my_project` to avoid path confusion
 
 **HTTP Endpoints (if using HTTP server):**
 
