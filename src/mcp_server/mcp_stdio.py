@@ -145,14 +145,28 @@ def _run_bundle(arguments: dict) -> dict:
         env["DEPLOY_DIR"] = str(deploy_path.resolve())
 
     # Run bundler from MCP server location (it needs node_modules)
-    process = subprocess.run(
-        ["node", str(script_path)],
-        cwd=str(mcp_server_root),
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        process = subprocess.run(
+            ["node", str(script_path)],
+            cwd=str(mcp_server_root),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10.0,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"Bundle operation timed out after 10 seconds.\n"
+            f"project_dir: {env.get('PROJECT_DIR')}\n"
+            f"This usually indicates:\n"
+            f"  1. Infinite loop in bundler script\n"
+            f"  2. Hanging file I/O operation\n"
+            f"  3. Node.js process stuck\n"
+            f"Captured output before timeout:\n"
+            f"stdout: {e.stdout.decode('utf-8') if e.stdout else '<none>'}\n"
+            f"stderr: {e.stderr.decode('utf-8') if e.stderr else '<none>'}"
+        )
 
     result = {
         "project_dir": env.get("PROJECT_DIR"),
