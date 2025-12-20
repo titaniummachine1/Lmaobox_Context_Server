@@ -2,6 +2,7 @@ import { bundle } from "luabundle";
 import { promises as fs, existsSync, readdirSync } from "fs";
 import path from "path";
 import os from "os";
+import { execFileSync } from "child_process";
 
 // Get directory and optional entry file from CLI args or env vars
 const cliDir = process.argv[2];
@@ -81,6 +82,56 @@ async function ensureEntryExists() {
 			`[Bundle] Entry file missing. Expected at: ${ENTRY_FILE}. ${error.message}`,
 		);
 	}
+}
+
+async function validateLuaSyntax(filePath) {
+	try {
+		execFileSync("luac", ["-p", filePath], {
+			encoding: "utf8",
+			timeout: 5000,
+		});
+		return { valid: true };
+	} catch (error) {
+		if (error.code === "ENOENT") {
+			console.warn("[Bundle] ⚠️  luac not found, skipping fast syntax check");
+			return { valid: true, skipped: true };
+		}
+		return {
+			valid: false,
+			error: error.stderr || error.message,
+		};
+	}
+}
+
+async function validateAllLuaFiles(projectDir) {
+	const files = [];
+	
+	async function collectLuaFiles(dir) {
+		const entries = await fs.readdir(dir, { withFileTypes: true });
+		for (const entry of entries) {
+			const fullPath = path.join(dir, entry.name);
+			if (entry.isDirectory() && entry.name !== "build" && entry.name !== "node_modules") {
+				await collectLuaFiles(fullPath);
+			} else if (entry.isFile() && entry.name.endsWith(".lua")) {
+				files.push(fullPath);
+			}
+		}
+	}
+	
+	await collectLuaFiles(projectDir);
+	
+	for (const file of files) {
+		const result = await validateLuaSyntax(file);
+		if (!result.valid) {
+			const relPath = path.relative(projectDir, file);
+			throw new Error(
+				`Lua syntax error in ${relPath}:\n${result.error}\n\n` +
+				`Fix syntax errors before bundling.`
+			);
+		}
+	}
+	
+	return files.length;
 }
 
 async function writeBundle(outputPath, bundledLua) {
@@ -299,8 +350,13 @@ function printDependencyTree() {
 }
 
 async function main() {
+	const DRY_RUN = process.env.DRY_RUN === "true";
+	
 	console.log(`[Bundle] Project directory: ${PROJECT_DIR}`);
 	console.log(`[Bundle] Entry file: ${ENTRY_FILENAME}`);
+	if (DRY_RUN) {
+		console.log(`[Bundle] Mode: DRY RUN (validation only, no deployment)`);
+	}
 	
 	if (!IS_MAIN) {
 		console.log(`[Bundle] ⚠️  Entry file is not Main.lua (case-insensitive)`);
@@ -310,6 +366,11 @@ async function main() {
 	await ensureEntryExists();
 	const outputName = await readOutputName();
 	await fs.mkdir(BUILD_DIR, { recursive: true });
+
+	// Fast syntax validation BEFORE bundling (prevents hangs)
+	console.log("[Bundle] Pre-validating Lua syntax...");
+	const fileCount = await validateAllLuaFiles(PROJECT_DIR);
+	console.log(`[Bundle] ✓ Validated ${fileCount} file(s)`);
 
 	// Build dependency tree (for AI visibility)
 	console.log("[Bundle] Analyzing dependencies...");
@@ -339,12 +400,16 @@ async function main() {
 			}
 			
 			// Deploy single file directly
-			const content = await fs.readFile(ENTRY_FILE, "utf8");
-			const deployDir = resolveDeployDir();
-			const deployPath = path.join(deployDir, ENTRY_FILENAME);
-			await fs.mkdir(deployDir, { recursive: true });
-			await fs.writeFile(deployPath, content, "utf8");
-			console.log(`[Bundle] ✓ Deployed single file: ${deployPath}`);
+			if (!DRY_RUN) {
+				const content = await fs.readFile(ENTRY_FILE, "utf8");
+				const deployDir = resolveDeployDir();
+				const deployPath = path.join(deployDir, ENTRY_FILENAME);
+				await fs.mkdir(deployDir, { recursive: true });
+				await fs.writeFile(deployPath, content, "utf8");
+				console.log(`[Bundle] ✓ Deployed single file: ${deployPath}`);
+			} else {
+				console.log(`[Bundle] ✓ Syntax valid (DRY RUN - skipped deployment)`);
+			}
 			return;
 		} finally {
 			process.chdir(prevCwd);
@@ -455,10 +520,14 @@ async function main() {
 		await writeBundle(outputPath, bundledLua);
 		console.log(`[Bundle] ✓ Bundle created: ${outputPath}`);
 
-		const deployDir = resolveDeployDir();
-		const deployPath = path.join(deployDir, outputName);
-		await deployBundle(outputPath, deployPath);
-		console.log(`[Bundle] ✓ Deployed: ${deployPath}`);
+		if (!DRY_RUN) {
+			const deployDir = resolveDeployDir();
+			const deployPath = path.join(deployDir, outputName);
+			await deployBundle(outputPath, deployPath);
+			console.log(`[Bundle] ✓ Deployed: ${deployPath}`);
+		} else {
+			console.log(`[Bundle] ✓ Bundle validated (DRY RUN - skipped deployment)`);
+		}
 	} finally {
 		process.chdir(prevCwd);
 	}

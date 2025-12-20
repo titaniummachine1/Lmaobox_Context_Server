@@ -5,8 +5,12 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
+import threading
+import queue
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from .server import get_smart_context, get_types
 
@@ -86,9 +90,100 @@ def handle_tools_list() -> dict:
                     },
                     "required": ["projectDir"]
                 }
+            },
+            {
+                "name": "luacheck",
+                "description": "Validate Lua file syntax and optionally test bundling. Fast syntax check using luac OR test if file bundles correctly without deploying. Use this instead of terminal commands to quickly validate Lua code. Returns syntax errors or bundling issues.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "filePath": {
+                            "type": "string",
+                            "description": "Absolute path to .lua file to check. Can be a single file or Main.lua for bundle validation."
+                        },
+                        "checkBundle": {
+                            "type": "boolean",
+                            "description": "If true, test if file/project bundles correctly (dry-run without deploy). If false (default), only run syntax check with luac. Set true for files that use require() or are part of a bundle."
+                        }
+                    },
+                    "required": ["filePath"]
+                }
             }
         ]
     }
+
+
+def _run_luacheck(arguments: dict) -> dict:
+    """Check Lua file syntax or test bundling without deploy."""
+    file_path = arguments.get("filePath")
+    if not file_path:
+        raise ValueError("filePath is required")
+    
+    file_path = Path(file_path).expanduser().resolve()
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    if not file_path.suffix == ".lua":
+        raise ValueError(f"Not a Lua file: {file_path}")
+    
+    check_bundle = arguments.get("checkBundle", False)
+    
+    if check_bundle:
+        project_dir = file_path.parent if file_path.name.lower() == "main.lua" else file_path.parent
+        
+        mcp_server_root = Path(__file__).resolve().parents[2]
+        script_path = mcp_server_root / "automations" / "bundle-and-deploy.js"
+        
+        if not script_path.exists():
+            raise FileNotFoundError(f"Bundle script missing: {script_path}")
+        
+        env = os.environ.copy()
+        env["PROJECT_DIR"] = str(project_dir)
+        env["DRY_RUN"] = "true"
+        
+        try:
+            process = subprocess.run(
+                ["node", str(script_path)],
+                cwd=str(mcp_server_root),
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10.0,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Bundle check timed out after 10 seconds")
+        
+        return {
+            "file": str(file_path),
+            "check_type": "bundle",
+            "stdout": process.stdout.strip(),
+            "stderr": process.stderr.strip(),
+            "exit_code": process.returncode,
+            "valid": process.returncode == 0
+        }
+    else:
+        try:
+            process = subprocess.run(
+                ["luac", "-p", str(file_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5.0,
+            )
+        except FileNotFoundError:
+            raise RuntimeError("luac not found. Install Lua or enable checkBundle for bundle validation.")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Syntax check timed out")
+        
+        return {
+            "file": str(file_path),
+            "check_type": "syntax",
+            "stdout": process.stdout.strip(),
+            "stderr": process.stderr.strip(),
+            "exit_code": process.returncode,
+            "valid": process.returncode == 0
+        }
 
 
 def _run_bundle(arguments: dict) -> dict:
@@ -145,28 +240,94 @@ def _run_bundle(arguments: dict) -> dict:
         env["DEPLOY_DIR"] = str(deploy_path.resolve())
 
     # Run bundler from MCP server location (it needs node_modules)
+    # CRITICAL: Use temp files instead of pipes to avoid MCP STDIO deadlock
+    # MCP STDIO blocks subprocess pipes because it owns stdin/stdout
+    LOG.warning(f"[TIMEOUT_DEBUG] Starting bundle with 10s timeout for: {project_path}")
+    
+    stdout_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.stdout')
+    stderr_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.stderr')
+    
     try:
-        process = subprocess.run(
-            ["node", str(script_path)],
-            cwd=str(mcp_server_root),
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10.0,
-        )
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError(
-            f"Bundle operation timed out after 10 seconds.\n"
-            f"project_dir: {env.get('PROJECT_DIR')}\n"
-            f"This usually indicates:\n"
-            f"  1. Infinite loop in bundler script\n"
-            f"  2. Hanging file I/O operation\n"
-            f"  3. Node.js process stuck\n"
-            f"Captured output before timeout:\n"
-            f"stdout: {e.stdout.decode('utf-8') if e.stdout else '<none>'}\n"
-            f"stderr: {e.stderr.decode('utf-8') if e.stderr else '<none>'}"
-        )
+        stdout_file.close()
+        stderr_file.close()
+        
+        result_queue: queue.Queue = queue.Queue()
+        exception_queue: queue.Queue = queue.Queue()
+        
+        def run_subprocess():
+            """Run subprocess with file redirection to avoid STDIO pipe blocking."""
+            try:
+                with open(stdout_file.name, 'w') as out, open(stderr_file.name, 'w') as err:
+                    proc = subprocess.run(
+                        ["node", str(script_path)],
+                        cwd=str(mcp_server_root),
+                        env=env,
+                        stdout=out,
+                        stderr=err,
+                        stdin=subprocess.DEVNULL,
+                        check=False,
+                        timeout=10.0,
+                    )
+                    result_queue.put((proc.returncode, None))
+            except subprocess.TimeoutExpired:
+                result_queue.put((None, "timeout"))
+            except Exception as e:
+                result_queue.put((None, str(e)))
+        
+        thread = threading.Thread(target=run_subprocess, daemon=True)
+        thread.start()
+        thread.join(timeout=12.0)
+        
+        # Check if thread completed
+        if thread.is_alive():
+            LOG.error(f"[TIMEOUT_DEBUG] Thread alive after 12s - hard timeout triggered")
+            raise RuntimeError(
+                f"Bundle operation exceeded 12 second hard limit.\n"
+                f"project_dir: {env.get('PROJECT_DIR')}\n"
+                f"This indicates the Node.js bundler is stuck or MCP STDIO is blocking execution.\n"
+            )
+        
+        # Get result
+        if result_queue.empty():
+            raise RuntimeError(f"Bundle thread finished but no result queued.\nproject_dir: {env.get('PROJECT_DIR')}")
+        
+        returncode, error = result_queue.get()
+        
+        # Read output from temp files
+        with open(stdout_file.name, 'r') as f:
+            stdout_text = f.read()
+        with open(stderr_file.name, 'r') as f:
+            stderr_text = f.read()
+        
+        if error == "timeout":
+            raise RuntimeError(
+                f"Bundle operation timed out after 10 seconds.\n"
+                f"project_dir: {env.get('PROJECT_DIR')}\n"
+                f"Output before timeout:\n"
+                f"stdout: {stdout_text or '<none>'}\n"
+                f"stderr: {stderr_text or '<none>'}"
+            )
+        elif error:
+            raise RuntimeError(f"Bundle subprocess error: {error}\nproject_dir: {env.get('PROJECT_DIR')}")
+        
+        LOG.warning(f"[TIMEOUT_DEBUG] Bundle completed (exit {returncode})")
+        
+        # Create mock process result for compatibility
+        class ProcessResult:
+            def __init__(self, returncode, stdout, stderr):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+        
+        process = ProcessResult(returncode, stdout_text, stderr_text)
+        
+    finally:
+        # Cleanup temp files
+        try:
+            os.unlink(stdout_file.name)
+            os.unlink(stderr_file.name)
+        except:
+            pass
 
     result = {
         "project_dir": env.get("PROJECT_DIR"),
@@ -226,6 +387,23 @@ def handle_tools_call(name: str, arguments: dict) -> dict:
         ]
         if result["stderr"]:
             output_lines.extend(["", "=== stderr ===", result["stderr"]])
+        return {"content": [{"type": "text", "text": "\n".join(output_lines)}]}
+
+    elif name == "luacheck":
+        result = _run_luacheck(arguments)
+        status = "✓ VALID" if result["valid"] else "✗ INVALID"
+        output_lines = [
+            f"{status} | {result['check_type'].upper()} CHECK",
+            f"file: {result['file']}",
+            f"exit_code: {result['exit_code']}",
+            "",
+        ]
+        if result["stdout"]:
+            output_lines.append(result["stdout"])
+        if result["stderr"]:
+            output_lines.extend(["", "=== errors ===", result["stderr"]])
+        if result["valid"] and not result["stdout"] and not result["stderr"]:
+            output_lines.append("No errors found.")
         return {"content": [{"type": "text", "text": "\n".join(output_lines)}]}
 
     else:
