@@ -6,7 +6,8 @@ import { execFileSync } from "child_process";
 
 // Find Lua 5.4+ compiler - REQUIRED
 function findLuac() {
-  const bundledLuaDir = path.join(path.dirname(new URL(import.meta.url).pathname), "bin", "lua");
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
+  const bundledLuaDir = path.join(scriptDir, "bin", "lua");
   
   const candidates = [
     { cmd: path.join(bundledLuaDir, "luac54.exe"), version: "5.4" },
@@ -52,7 +53,7 @@ function findLuac() {
 // Auto-install Lua 5.4+ if not found
 function autoSetupLua() {
   try {
-    const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+    const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
     const installScript = path.join(scriptDir, "install_lua.py");
     
     if (!existsSync(installScript)) {
