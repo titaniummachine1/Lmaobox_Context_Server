@@ -2,6 +2,17 @@
 
 Single-purpose MCP server for serving Lmaobox Lua API context, generated types, and curated smart-context notes. Everything is in English to keep the workflow consistent.
 
+## Requirements
+
+- **Python 3.9+**
+- **Node.js** (for bundler automation)
+- **Lua 5.4+** - Auto-installed on first use for frictionless setup
+  - ✅ **Auto-Setup**: MCP server automatically downloads and installs Lua 5.4+ to `automations/bin/lua/` on first run
+  - ✅ **Zero Configuration**: No manual installation required - just launch the MCP server
+  - ✅ **Version Detection**: Automatically detects system Lua 5.4+ or uses bundled version
+  - Manual install (optional): Download from [lua.org](https://www.lua.org/download.html) or [LuaBinaries](https://luabinaries.sourceforge.net/)
+  - Supports modern syntax like `&`, `|`, `~`, `<<` bitwise operators to match Lmaobox runtime
+
 ## What’s here
 
 - **MCP server** (`src/mcp_server/`): stdio and HTTP server for `get_types` and `get_smart_context`.
@@ -67,8 +78,13 @@ Defaults: `127.0.0.1:8765`. Configure via env:
   - ⚠️ **BLOCKS AI for up to 10 seconds** during execution
   - ⚠️ **Requires absolute paths** - relative paths resolve from MCP server launch CWD, not active workspace
   - ⚠️ **Requires MCP server installation** with `automations/bundle-and-deploy.js` and node_modules
+  - ⚠️ **Requires Lua 5.4+** - Uses luac for pre-validation (supports modern syntax like `&` operator)
   - Bundles Main.lua and dependencies, deploys to `%LOCALAPPDATA%/lua`
   - Use absolute paths like `C:/my_project` to avoid path confusion
+- `luacheck(filePath, checkBundle?)` - Validate Lua syntax or test bundling
+  - Fast syntax validation using Lua 5.4+ compiler
+  - Automatically detects best available compiler (luac5.4, luac54, luac5.5, luac55, or fallback)
+  - Returns validation status with Lua version used
 
 **HTTP Endpoints (if using HTTP server):**
 

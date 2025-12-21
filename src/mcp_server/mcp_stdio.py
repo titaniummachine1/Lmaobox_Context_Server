@@ -16,6 +16,80 @@ from .server import get_smart_context, get_types
 
 LOG = logging.getLogger("mcp_stdio")
 
+# Lua compiler detection - REQUIRES Lua 5.4+
+def find_luac() -> tuple[str, str]:
+    """Find Lua 5.4+ compiler. Returns (command, version). Rejects older versions."""
+    mcp_root = Path(__file__).resolve().parents[2]
+    bundled_lua_dir = mcp_root / "automations" / "bin" / "lua"
+    
+    candidates = [
+        (str(bundled_lua_dir / "luac54.exe"), "5.4"),
+        (str(bundled_lua_dir / "luac5.4.exe"), "5.4"),
+        (str(bundled_lua_dir / "luac.exe"), "5.4"),
+        ("luac5.4", "5.4"),
+        ("luac54", "5.4"),
+        ("luac5.5", "5.5"),
+        ("luac55", "5.5"),
+    ]
+    
+    for cmd, version in candidates:
+        try:
+            if Path(cmd).is_absolute():
+                if not Path(cmd).exists():
+                    continue
+            
+            subprocess.run(
+                [cmd, "-v"],
+                capture_output=True,
+                timeout=1.0,
+                check=False
+            )
+            return (cmd, version)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    
+    _auto_setup_lua()
+    
+    for cmd, version in candidates[:3]:
+        try:
+            if Path(cmd).exists():
+                return (cmd, version)
+        except:
+            continue
+    
+    raise FileNotFoundError(
+        "Lua 5.4+ required but not found.\n"
+        "Install Lua 5.4.2+ from: https://luabinaries.sourceforge.net/\n"
+        "Lmaobox runtime uses Lua 5.4 features (bitwise operators: &, |, ~, <<).\n"
+        "Older Lua versions are NOT supported."
+    )
+
+def _auto_setup_lua():
+    """Auto-install Lua 5.4+ if not found."""
+    try:
+        mcp_root = Path(__file__).resolve().parents[2]
+        install_script = mcp_root / "automations" / "install_lua.py"
+        
+        if not install_script.exists():
+            LOG.warning("[Lua Setup] Auto-installer script not found, skipping")
+            return
+        
+        LOG.info("[Lua Setup] Auto-installing Lua 5.4+ for frictionless usage...")
+        result = subprocess.run(
+            [sys.executable, str(install_script)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False
+        )
+        
+        if result.returncode == 0:
+            LOG.info("[Lua Setup] Auto-install completed successfully")
+        else:
+            LOG.warning(f"[Lua Setup] Auto-install had issues: {result.stderr}")
+    except Exception as e:
+        LOG.warning(f"[Lua Setup] Auto-install failed: {e}")
+
 # MCP protocol message handlers
 
 
@@ -93,7 +167,7 @@ def handle_tools_list() -> dict:
             },
             {
                 "name": "luacheck",
-                "description": "Validate Lua file syntax and optionally test bundling. Fast syntax check using luac OR test if file bundles correctly without deploying. Use this instead of terminal commands to quickly validate Lua code. Returns syntax errors or bundling issues.",
+                "description": "Validate Lua file syntax and optionally test bundling. Fast syntax check using Lua 5.4+ compiler (supports modern syntax like & operator) OR test if file bundles correctly without deploying. Automatically detects best available Lua compiler (luac5.4, luac54, luac5.5, luac55, or fallback luac). Use this instead of terminal commands to quickly validate Lua code. Returns syntax errors or bundling issues.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -164,21 +238,26 @@ def _run_luacheck(arguments: dict) -> dict:
         }
     else:
         try:
+            luac_cmd, lua_version = find_luac()
+            LOG.info(f"Using Lua compiler: {luac_cmd} (version {lua_version})")
+            
             process = subprocess.run(
-                ["luac", "-p", str(file_path)],
+                [luac_cmd, "-p", str(file_path)],
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=5.0,
             )
-        except FileNotFoundError:
-            raise RuntimeError("luac not found. Install Lua or enable checkBundle for bundle validation.")
+            
+        except FileNotFoundError as e:
+            raise RuntimeError(str(e))
         except subprocess.TimeoutExpired:
             raise RuntimeError("Syntax check timed out")
         
         return {
             "file": str(file_path),
             "check_type": "syntax",
+            "lua_version": lua_version,
             "stdout": process.stdout.strip(),
             "stderr": process.stderr.strip(),
             "exit_code": process.returncode,
@@ -395,9 +474,13 @@ def handle_tools_call(name: str, arguments: dict) -> dict:
         output_lines = [
             f"{status} | {result['check_type'].upper()} CHECK",
             f"file: {result['file']}",
+        ]
+        if result.get("lua_version"):
+            output_lines.append(f"lua_version: {result['lua_version']}")
+        output_lines.extend([
             f"exit_code: {result['exit_code']}",
             "",
-        ]
+        ])
         if result["stdout"]:
             output_lines.append(result["stdout"])
         if result["stderr"]:
