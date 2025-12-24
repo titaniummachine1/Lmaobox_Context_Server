@@ -2,13 +2,23 @@ import { bundle } from "luabundle";
 import { promises as fs, existsSync, readdirSync } from "fs";
 import path from "path";
 import os from "os";
-import { execFileSync } from "child_process";
+import { execFileSync, spawn } from "child_process";
+
+// Cached Lua compiler to prevent repeated lookups and console spam
+let cachedLuac = null;
 
 // Find Lua 5.4+ compiler - REQUIRED
 function findLuac() {
-  const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
-  const bundledLuaDir = path.join(scriptDir, "bin", "lua");
+  // Return cached result to prevent repeated console output
+  if (cachedLuac) {
+    return cachedLuac;
+  }
   
+  const scriptDir = path.dirname(
+    new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")
+  );
+  const bundledLuaDir = path.join(scriptDir, "bin", "lua");
+
   const candidates = [
     { cmd: path.join(bundledLuaDir, "luac54.exe"), version: "5.4" },
     { cmd: path.join(bundledLuaDir, "luac5.4.exe"), version: "5.4" },
@@ -18,49 +28,55 @@ function findLuac() {
     { cmd: "luac5.5", version: "5.5" },
     { cmd: "luac55", version: "5.5" },
   ];
-  
+
   for (const { cmd, version } of candidates) {
     try {
       if (path.isAbsolute(cmd) && !existsSync(cmd)) {
         continue;
       }
-      
+
       execFileSync(cmd, ["-v"], { timeout: 1000 });
       console.log(`[Bundle] Using Lua compiler: ${cmd} (version ${version})`);
-      return { cmd, version };
+      cachedLuac = { cmd, version };
+      return cachedLuac;
     } catch (error) {
       continue;
     }
   }
-  
+
   autoSetupLua();
-  
+
   for (const { cmd, version } of candidates.slice(0, 3)) {
     if (existsSync(cmd)) {
-      console.log(`[Bundle] Using auto-installed Lua: ${cmd} (version ${version})`);
-      return { cmd, version };
+      console.log(
+        `[Bundle] Using auto-installed Lua: ${cmd} (version ${version})`
+      );
+      cachedLuac = { cmd, version };
+      return cachedLuac;
     }
   }
-  
+
   throw new Error(
     "Lua 5.4+ required but not found.\n" +
-    "Install Lua 5.4.2+ from: https://luabinaries.sourceforge.net/\n" +
-    "Lmaobox runtime uses Lua 5.4 features (bitwise operators: &, |, ~, <<).\n" +
-    "Older Lua versions are NOT supported."
+      "Install Lua 5.4.2+ from: https://luabinaries.sourceforge.net/\n" +
+      "Lmaobox runtime uses Lua 5.4 features (bitwise operators: &, |, ~, <<).\n" +
+      "Older Lua versions are NOT supported."
   );
 }
 
 // Auto-install Lua 5.4+ if not found
 function autoSetupLua() {
   try {
-    const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
+    const scriptDir = path.dirname(
+      new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")
+    );
     const installScript = path.join(scriptDir, "install_lua.py");
-    
+
     if (!existsSync(installScript)) {
       console.warn("[Bundle] Auto-installer script not found, skipping");
       return;
     }
-    
+
     console.log("[Bundle] Auto-installing Lua 5.4+ for frictionless usage...");
     const result = execFileSync("python", [installScript], {
       encoding: "utf8",
@@ -162,7 +178,7 @@ async function ensureEntryExists() {
 
 async function validateLuaSyntax(filePath) {
   const luac = findLuac();
-  
+
   try {
     execFileSync(luac.cmd, ["-p", filePath], {
       encoding: "utf8",
@@ -179,20 +195,36 @@ async function validateLuaSyntax(filePath) {
 
 async function validateAllLuaFiles(projectDir) {
   const files = [];
+  const visited = new Set();
 
   async function collectLuaFiles(dir) {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (
-        entry.isDirectory() &&
-        entry.name !== "build" &&
-        entry.name !== "node_modules"
-      ) {
-        await collectLuaFiles(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith(".lua")) {
-        files.push(fullPath);
+    const normalizedDir = path.resolve(dir);
+
+    // Prevent infinite recursion by tracking visited directories
+    if (visited.has(normalizedDir)) {
+      return;
+    }
+    visited.add(normalizedDir);
+
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (
+          entry.isDirectory() &&
+          entry.name !== "build" &&
+          entry.name !== "node_modules" &&
+          !entry.name.startsWith(".")
+        ) {
+          await collectLuaFiles(fullPath);
+        } else if (entry.isFile() && entry.name.endsWith(".lua")) {
+          files.push(fullPath);
+        }
       }
+    } catch (error) {
+      console.warn(
+        `[Bundle] Warning: Cannot read directory ${dir}: ${error.message}`
+      );
     }
   }
 
@@ -280,6 +312,84 @@ async function isGlobalModule(moduleName) {
     }
   }
   return false;
+}
+
+// Run bundle operation in separate process with timeout to prevent freezes
+async function runBundleWithTimeout(projectDir, entryFile, timeoutMs) {
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
+  const workerScript = path.join(scriptDir, "bundle-worker.js");
+
+  return new Promise((resolve, reject) => {
+    let isResolved = false;
+    
+    const child = spawn("node", [workerScript, projectDir, entryFile], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    const timeout = setTimeout(() => {
+      if (!isResolved) {
+        isResolved = true;
+        child.kill('SIGTERM');
+        // Force kill if SIGTERM doesn't work
+        setTimeout(() => child.kill('SIGKILL'), 1000);
+        reject(new Error(
+          `Bundle operation timed out after ${timeoutMs/1000} seconds. This usually indicates:\n` +
+          '1. Circular dependency loop\n' +
+          '2. Very large project (try splitting into smaller modules)\n' +
+          '3. Invalid require() paths causing infinite resolution\n' +
+          'Check your dependencies for cycles and fix require() paths.'
+        ));
+      }
+    }, timeoutMs);
+
+    child.on('close', (code, signal) => {
+      if (isResolved) return;
+      isResolved = true;
+      clearTimeout(timeout);
+
+      if (signal) {
+        reject(new Error(`Bundle worker was killed with signal ${signal}`));
+        return;
+      }
+
+      if (code === 0) {
+        const lines = stdout.trim().split('\n');
+        if (lines.length >= 2 && lines[0] === 'BUNDLE_SUCCESS') {
+          const bundledLua = lines.slice(1).join('\n');
+          resolve(bundledLua);
+        } else {
+          reject(new Error(`Unexpected worker output: ${stdout}`));
+        }
+      } else {
+        const errorLines = stderr.trim().split('\n');
+        if (errorLines.length >= 2 && errorLines[0] === 'BUNDLE_ERROR') {
+          reject(new Error(errorLines.slice(1).join('\n')));
+        } else {
+          reject(new Error(`Bundle worker failed with code ${code}: ${stderr}`));
+        }
+      }
+    });
+
+    child.on('error', (error) => {
+      if (!isResolved) {
+        isResolved = true;
+        clearTimeout(timeout);
+        reject(new Error(`Failed to start bundle worker: ${error.message}`));
+      }
+    });
+  });
 }
 
 async function buildDependencyTree(
@@ -471,12 +581,9 @@ async function main() {
     try {
       process.chdir(PROJECT_DIR);
 
-      // Try to parse with luabundle (syntax check)
+      // Try to parse with luabundle (syntax check) with timeout protection
       try {
-        bundle(ENTRY_FILENAME, {
-          metadata: false,
-          paths: ["./?.lua", "./?/init.lua"],
-        });
+        await runBundleWithTimeout(PROJECT_DIR, ENTRY_FILENAME, 10000);
         console.log(`[Bundle] ✓ Syntax valid`);
       } catch (syntaxError) {
         throw new Error(
@@ -558,23 +665,8 @@ async function main() {
 
     let bundledLua;
     try {
-      bundledLua = bundle(ENTRY_FILENAME, {
-        metadata: false,
-        paths: ["./?.lua", "./?/init.lua"],
-        force: false,
-        expressionHandler: (module, expression) => {
-          if (expression?.loc?.start) {
-            const start = expression.loc.start;
-            console.warn(
-              `⚠️  Non-literal require in '${module.name}' at ${start.line}:${start.column}`
-            );
-          } else {
-            console.warn(
-              `⚠️  Non-literal require in '${module.name}' at unknown location`
-            );
-          }
-        },
-      });
+      // Run bundle in separate process with hard timeout to prevent freezes
+      bundledLua = await runBundleWithTimeout(PROJECT_DIR, ENTRY_FILENAME, 30000);
     } catch (bundleError) {
       throw new Error(
         `Bundling failed: ${bundleError.message}\n` +
