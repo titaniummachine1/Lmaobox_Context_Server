@@ -2,7 +2,7 @@ import { bundle } from "luabundle";
 import { promises as fs, existsSync, readdirSync } from "fs";
 import path from "path";
 import os from "os";
-import { execFileSync } from "child_process";
+import { execFileSync, spawn } from "child_process";
 
 // Cached Lua compiler to prevent repeated lookups and console spam
 let cachedLuac = null;
@@ -314,6 +314,84 @@ async function isGlobalModule(moduleName) {
   return false;
 }
 
+// Run bundle operation in separate process with timeout to prevent freezes
+async function runBundleWithTimeout(projectDir, entryFile, timeoutMs) {
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
+  const workerScript = path.join(scriptDir, "bundle-worker.js");
+
+  return new Promise((resolve, reject) => {
+    let isResolved = false;
+    
+    const child = spawn("node", [workerScript, projectDir, entryFile], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    const timeout = setTimeout(() => {
+      if (!isResolved) {
+        isResolved = true;
+        child.kill('SIGTERM');
+        // Force kill if SIGTERM doesn't work
+        setTimeout(() => child.kill('SIGKILL'), 1000);
+        reject(new Error(
+          `Bundle operation timed out after ${timeoutMs/1000} seconds. This usually indicates:\n` +
+          '1. Circular dependency loop\n' +
+          '2. Very large project (try splitting into smaller modules)\n' +
+          '3. Invalid require() paths causing infinite resolution\n' +
+          'Check your dependencies for cycles and fix require() paths.'
+        ));
+      }
+    }, timeoutMs);
+
+    child.on('close', (code, signal) => {
+      if (isResolved) return;
+      isResolved = true;
+      clearTimeout(timeout);
+
+      if (signal) {
+        reject(new Error(`Bundle worker was killed with signal ${signal}`));
+        return;
+      }
+
+      if (code === 0) {
+        const lines = stdout.trim().split('\n');
+        if (lines.length >= 2 && lines[0] === 'BUNDLE_SUCCESS') {
+          const bundledLua = lines.slice(1).join('\n');
+          resolve(bundledLua);
+        } else {
+          reject(new Error(`Unexpected worker output: ${stdout}`));
+        }
+      } else {
+        const errorLines = stderr.trim().split('\n');
+        if (errorLines.length >= 2 && errorLines[0] === 'BUNDLE_ERROR') {
+          reject(new Error(errorLines.slice(1).join('\n')));
+        } else {
+          reject(new Error(`Bundle worker failed with code ${code}: ${stderr}`));
+        }
+      }
+    });
+
+    child.on('error', (error) => {
+      if (!isResolved) {
+        isResolved = true;
+        clearTimeout(timeout);
+        reject(new Error(`Failed to start bundle worker: ${error.message}`));
+      }
+    });
+  });
+}
+
 async function buildDependencyTree(
   entryFile,
   searchPaths,
@@ -503,12 +581,9 @@ async function main() {
     try {
       process.chdir(PROJECT_DIR);
 
-      // Try to parse with luabundle (syntax check)
+      // Try to parse with luabundle (syntax check) with timeout protection
       try {
-        bundle(ENTRY_FILENAME, {
-          metadata: false,
-          paths: ["./?.lua", "./?/init.lua"],
-        });
+        await runBundleWithTimeout(PROJECT_DIR, ENTRY_FILENAME, 10000);
         console.log(`[Bundle] ✓ Syntax valid`);
       } catch (syntaxError) {
         throw new Error(
@@ -590,23 +665,8 @@ async function main() {
 
     let bundledLua;
     try {
-      bundledLua = bundle(ENTRY_FILENAME, {
-        metadata: false,
-        paths: ["./?.lua", "./?/init.lua"],
-        force: false,
-        expressionHandler: (module, expression) => {
-          if (expression?.loc?.start) {
-            const start = expression.loc.start;
-            console.warn(
-              `⚠️  Non-literal require in '${module.name}' at ${start.line}:${start.column}`
-            );
-          } else {
-            console.warn(
-              `⚠️  Non-literal require in '${module.name}' at unknown location`
-            );
-          }
-        },
-      });
+      // Run bundle in separate process with hard timeout to prevent freezes
+      bundledLua = await runBundleWithTimeout(PROJECT_DIR, ENTRY_FILENAME, 30000);
     } catch (bundleError) {
       throw new Error(
         `Bundling failed: ${bundleError.message}\n` +

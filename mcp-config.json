@@ -1,10 +1,8 @@
 {
   "mcpServers": {
     "lmaobox-context": {
-      "command": "python",
-      "args": [
-        "C:\\Users\\Terminatort8000\\Desktop\\Lmaobox_Context_Server\\launch_mcp.py"
-      ],
+      "command": "C:\\Users\\Terminatort8000\\Desktop\\Lmaobox_Context_Server\\lmaobox-context-server.exe",
+      "args": [],
       "cwd": "C:\\Users\\Terminatort8000\\Desktop\\Lmaobox_Context_Server"
     }
   }
