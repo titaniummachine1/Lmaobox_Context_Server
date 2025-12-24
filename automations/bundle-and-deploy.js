@@ -4,11 +4,21 @@ import path from "path";
 import os from "os";
 import { execFileSync } from "child_process";
 
+// Cached Lua compiler to prevent repeated lookups and console spam
+let cachedLuac = null;
+
 // Find Lua 5.4+ compiler - REQUIRED
 function findLuac() {
-  const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
-  const bundledLuaDir = path.join(scriptDir, "bin", "lua");
+  // Return cached result to prevent repeated console output
+  if (cachedLuac) {
+    return cachedLuac;
+  }
   
+  const scriptDir = path.dirname(
+    new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")
+  );
+  const bundledLuaDir = path.join(scriptDir, "bin", "lua");
+
   const candidates = [
     { cmd: path.join(bundledLuaDir, "luac54.exe"), version: "5.4" },
     { cmd: path.join(bundledLuaDir, "luac5.4.exe"), version: "5.4" },
@@ -18,49 +28,55 @@ function findLuac() {
     { cmd: "luac5.5", version: "5.5" },
     { cmd: "luac55", version: "5.5" },
   ];
-  
+
   for (const { cmd, version } of candidates) {
     try {
       if (path.isAbsolute(cmd) && !existsSync(cmd)) {
         continue;
       }
-      
+
       execFileSync(cmd, ["-v"], { timeout: 1000 });
       console.log(`[Bundle] Using Lua compiler: ${cmd} (version ${version})`);
-      return { cmd, version };
+      cachedLuac = { cmd, version };
+      return cachedLuac;
     } catch (error) {
       continue;
     }
   }
-  
+
   autoSetupLua();
-  
+
   for (const { cmd, version } of candidates.slice(0, 3)) {
     if (existsSync(cmd)) {
-      console.log(`[Bundle] Using auto-installed Lua: ${cmd} (version ${version})`);
-      return { cmd, version };
+      console.log(
+        `[Bundle] Using auto-installed Lua: ${cmd} (version ${version})`
+      );
+      cachedLuac = { cmd, version };
+      return cachedLuac;
     }
   }
-  
+
   throw new Error(
     "Lua 5.4+ required but not found.\n" +
-    "Install Lua 5.4.2+ from: https://luabinaries.sourceforge.net/\n" +
-    "Lmaobox runtime uses Lua 5.4 features (bitwise operators: &, |, ~, <<).\n" +
-    "Older Lua versions are NOT supported."
+      "Install Lua 5.4.2+ from: https://luabinaries.sourceforge.net/\n" +
+      "Lmaobox runtime uses Lua 5.4 features (bitwise operators: &, |, ~, <<).\n" +
+      "Older Lua versions are NOT supported."
   );
 }
 
 // Auto-install Lua 5.4+ if not found
 function autoSetupLua() {
   try {
-    const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
+    const scriptDir = path.dirname(
+      new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")
+    );
     const installScript = path.join(scriptDir, "install_lua.py");
-    
+
     if (!existsSync(installScript)) {
       console.warn("[Bundle] Auto-installer script not found, skipping");
       return;
     }
-    
+
     console.log("[Bundle] Auto-installing Lua 5.4+ for frictionless usage...");
     const result = execFileSync("python", [installScript], {
       encoding: "utf8",
@@ -162,7 +178,7 @@ async function ensureEntryExists() {
 
 async function validateLuaSyntax(filePath) {
   const luac = findLuac();
-  
+
   try {
     execFileSync(luac.cmd, ["-p", filePath], {
       encoding: "utf8",
@@ -179,20 +195,36 @@ async function validateLuaSyntax(filePath) {
 
 async function validateAllLuaFiles(projectDir) {
   const files = [];
+  const visited = new Set();
 
   async function collectLuaFiles(dir) {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (
-        entry.isDirectory() &&
-        entry.name !== "build" &&
-        entry.name !== "node_modules"
-      ) {
-        await collectLuaFiles(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith(".lua")) {
-        files.push(fullPath);
+    const normalizedDir = path.resolve(dir);
+
+    // Prevent infinite recursion by tracking visited directories
+    if (visited.has(normalizedDir)) {
+      return;
+    }
+    visited.add(normalizedDir);
+
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (
+          entry.isDirectory() &&
+          entry.name !== "build" &&
+          entry.name !== "node_modules" &&
+          !entry.name.startsWith(".")
+        ) {
+          await collectLuaFiles(fullPath);
+        } else if (entry.isFile() && entry.name.endsWith(".lua")) {
+          files.push(fullPath);
+        }
       }
+    } catch (error) {
+      console.warn(
+        `[Bundle] Warning: Cannot read directory ${dir}: ${error.message}`
+      );
     }
   }
 
