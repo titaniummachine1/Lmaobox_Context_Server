@@ -321,46 +321,82 @@ async function runBundleWithTimeout(projectDir, entryFile, timeoutMs) {
 
   return new Promise((resolve, reject) => {
     let isResolved = false;
+    let isTimedOut = false;
     
     const child = spawn("node", [workerScript, projectDir, entryFile], {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
+      windowsHide: true, // Hide window on Windows
     });
 
     let stdout = '';
     let stderr = '';
 
+    // Set a more aggressive timeout for error output
+    const outputTimeout = setTimeout(() => {
+      if (!isResolved && !isTimedOut) {
+        isTimedOut = true;
+        child.kill('SIGTERM');
+        setTimeout(() => {
+          if (!isResolved) {
+            child.kill('SIGKILL');
+          }
+        }, 2000);
+      }
+    }, Math.min(timeoutMs, 10000)); // Max 10 seconds for any output
+
     child.stdout.on('data', (data) => {
-      stdout += data.toString();
+      if (!isTimedOut) {
+        stdout += data.toString();
+        // Clear output timeout if we're receiving data
+        clearTimeout(outputTimeout);
+      }
     });
 
     child.stderr.on('data', (data) => {
-      stderr += data.toString();
+      if (!isTimedOut) {
+        stderr += data.toString();
+        // Clear output timeout if we're receiving data
+        clearTimeout(outputTimeout);
+      }
     });
 
     const timeout = setTimeout(() => {
-      if (!isResolved) {
+      if (!isResolved && !isTimedOut) {
+        isTimedOut = true;
         isResolved = true;
         child.kill('SIGTERM');
         // Force kill if SIGTERM doesn't work
-        setTimeout(() => child.kill('SIGKILL'), 1000);
-        reject(new Error(
-          `Bundle operation timed out after ${timeoutMs/1000} seconds. This usually indicates:\n` +
-          '1. Circular dependency loop\n' +
-          '2. Very large project (try splitting into smaller modules)\n' +
-          '3. Invalid require() paths causing infinite resolution\n' +
-          'Check your dependencies for cycles and fix require() paths.'
-        ));
+        setTimeout(() => child.kill('SIGKILL'), 2000);
+        
+        const errorMsg = `Bundle operation timed out after ${timeoutMs/1000} seconds.\n\n` +
+          `This usually indicates:\n` +
+          `1. Circular dependency loop in your require() statements\n` +
+          `2. Very large project (try splitting into smaller modules)\n` +
+          `3. Invalid require() paths causing infinite resolution\n\n` +
+          `Check your dependencies for cycles and fix require() paths.\n` +
+          `Project: ${projectDir}\n` +
+          `Entry: ${entryFile}`;
+          
+        reject(new Error(errorMsg));
       }
     }, timeoutMs);
 
     child.on('close', (code, signal) => {
       if (isResolved) return;
-      isResolved = true;
+      
       clearTimeout(timeout);
+      clearTimeout(outputTimeout);
+      
+      if (isTimedOut) {
+        // Already handled by timeout
+        return;
+      }
+      
+      isResolved = true;
 
-      if (signal) {
-        reject(new Error(`Bundle worker was killed with signal ${signal}`));
+      if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+        reject(new Error(`Bundle worker was killed (${signal}). This usually means it timed out or crashed.`));
         return;
       }
 
@@ -370,14 +406,15 @@ async function runBundleWithTimeout(projectDir, entryFile, timeoutMs) {
           const bundledLua = lines.slice(1).join('\n');
           resolve(bundledLua);
         } else {
-          reject(new Error(`Unexpected worker output: ${stdout}`));
+          reject(new Error(`Unexpected worker output format. Expected BUNDLE_SUCCESS prefix.`));
         }
       } else {
         const errorLines = stderr.trim().split('\n');
         if (errorLines.length >= 2 && errorLines[0] === 'BUNDLE_ERROR') {
-          reject(new Error(errorLines.slice(1).join('\n')));
+          const errorMsg = errorLines.slice(1).join('\n');
+          reject(new Error(`Bundle failed:\n${errorMsg}`));
         } else {
-          reject(new Error(`Bundle worker failed with code ${code}: ${stderr}`));
+          reject(new Error(`Bundle worker failed with exit code ${code}.\nStderr: ${stderr}\nStdout: ${stdout}`));
         }
       }
     });
@@ -386,7 +423,20 @@ async function runBundleWithTimeout(projectDir, entryFile, timeoutMs) {
       if (!isResolved) {
         isResolved = true;
         clearTimeout(timeout);
-        reject(new Error(`Failed to start bundle worker: ${error.message}`));
+        clearTimeout(outputTimeout);
+        
+        if (error.code === 'ENOENT') {
+          reject(new Error(`Failed to start bundle worker: node executable not found.\nPlease ensure Node.js is installed and in your PATH.`));
+        } else {
+          reject(new Error(`Failed to start bundle worker: ${error.message}`));
+        }
+      }
+    });
+
+    // Ensure child process is cleaned up if promise is rejected externally
+    process.on('uncaughtException', () => {
+      if (!isResolved) {
+        child.kill('SIGKILL');
       }
     });
   });
@@ -576,20 +626,28 @@ async function main() {
 
   // If not Main.lua, just validate syntax and deploy single file
   if (!IS_MAIN) {
-    console.log(`[Bundle] Validating Lua syntax...`);
+    console.log(`[Bundle] Validating single file: ${ENTRY_FILENAME}`);
     const prevCwd = process.cwd();
     try {
       process.chdir(PROJECT_DIR);
 
       // Try to parse with luabundle (syntax check) with timeout protection
       try {
+        console.log(`[Bundle] Checking syntax with 10 second timeout...`);
         await runBundleWithTimeout(PROJECT_DIR, ENTRY_FILENAME, 10000);
         console.log(`[Bundle] ✓ Syntax valid`);
       } catch (syntaxError) {
+        let errorMsg = syntaxError.message || syntaxError.toString();
+        
+        if (errorMsg.includes('timed out')) {
+          errorMsg = `Syntax check timed out for ${ENTRY_FILENAME}. This may indicate a syntax error or very large file.`;
+        } else if (errorMsg.includes('module not found')) {
+          errorMsg = `Missing dependency in ${ENTRY_FILENAME}:\n${errorMsg}\n\nNote: Single-file deployment cannot use require() for local files. Use Main.lua for full projects.`;
+        }
+        
         throw new Error(
-          `Lua syntax error in ${ENTRY_FILENAME}:\n` +
-            `${syntaxError.message}\n\n` +
-            `Fix syntax errors before deployment.`
+          `Lua syntax error in ${ENTRY_FILENAME}:\n\n${errorMsg}\n\n` +
+          `Fix syntax errors before deployment.`
         );
       }
 
@@ -666,17 +724,36 @@ async function main() {
     let bundledLua;
     try {
       // Run bundle in separate process with hard timeout to prevent freezes
+      console.log(`[Bundle] Bundling with 30 second timeout...`);
       bundledLua = await runBundleWithTimeout(PROJECT_DIR, ENTRY_FILENAME, 30000);
+      console.log(`[Bundle] ✓ Bundle completed successfully`);
     } catch (bundleError) {
+      // Provide more actionable error messages
+      let errorMessage = bundleError.message || bundleError.toString();
+      
+      // Add helpful context based on error type
+      if (errorMessage.includes('timed out')) {
+        errorMessage += '\n\n💡 TO FIX THIS:\n' +
+          '1. Check for circular require() loops (A requires B, B requires A)\n' +
+          '2. Look for very large files that might take too long to parse\n' +
+          '3. Ensure all require() paths are valid and exist\n' +
+          '4. Try splitting large modules into smaller ones';
+      } else if (errorMessage.includes('module not found') || errorMessage.includes('missing')) {
+        errorMessage += '\n\n💡 TO FIX THIS:\n' +
+          '1. Check all require() statements in your code\n' +
+          '2. Ensure the required files exist in the project directory\n' +
+          '3. Use relative paths like require("utils.helper") not absolute paths';
+      } else if (errorMessage.includes('syntax')) {
+        errorMessage += '\n\n💡 TO FIX THIS:\n' +
+          '1. Check for missing "end" statements\n' +
+          '2. Verify all parentheses, brackets, and quotes are matched\n' +
+          '3. Use a Lua linter to find syntax errors';
+      }
+      
       throw new Error(
-        `Bundling failed: ${bundleError.message}\n` +
-          `\nProject directory: ${PROJECT_DIR}\n` +
-          `Entry file: ${ENTRY_FILENAME}\n` +
-          `\nMake sure:\n` +
-          `  1. ${ENTRY_FILENAME} exists in project directory\n` +
-          `  2. All require() statements use valid module paths\n` +
-          `  3. Required modules exist in the project directory\n` +
-          `\nOriginal error: ${bundleError.stack || bundleError.message}`
+        `Bundling failed:\n${errorMessage}\n\n` +
+          `Project directory: ${PROJECT_DIR}\n` +
+          `Entry file: ${ENTRY_FILENAME}\n`
       );
     }
 
