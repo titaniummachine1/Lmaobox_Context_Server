@@ -308,70 +308,55 @@ func bundleLuaProject(ctx context.Context, projectDir, entryFile, bundleOutputDi
 		return deploySingleFile(ctx, entryFilePath, deployDir)
 	}
 
-	// Perform bundling for Main.lua
-	bundleCtx := &BundleContext{
-		ProjectDir:  projectDirAbs,
-		SearchPaths: []string{projectDirAbs},
-		Modules:     make(map[string]*LuaModule),
-		Visited:     make(map[string]bool),
-		Stack:       make(map[string]bool),
-	}
+	// Use Node.js luabundle for proper bundling
+	// Infer project name from folder
+	projectName := filepath.Base(projectDirAbs)
 
-	// Check timeout before starting
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	default:
-	}
-
-	// Validate all Lua files first
-	if err := validateAllLuaFiles(ctx, projectDirAbs); err != nil {
-		return "", fmt.Errorf("syntax validation failed: %v", err)
-	}
-
-	// Check timeout after validation
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	default:
-	}
-
-	// Build dependency tree
-	if err := buildDependencyTree(ctx, bundleCtx, entryFilePath); err != nil {
-		return "", fmt.Errorf("dependency analysis failed: %v", err)
-	}
-
-	// Check timeout after dependency analysis
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	default:
-	}
-
-	// Generate bundled output
-	bundledContent, err := generateBundledLua(bundleCtx, entryFilePath)
-	if err != nil {
-		return "", fmt.Errorf("bundle generation failed: %v", err)
-	}
-
-	// Check timeout after generation
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	default:
-	}
-
-	// Write bundle to output directory
 	buildDir := bundleOutputDir
 	if buildDir == "" {
 		buildDir = filepath.Join(projectDirAbs, "build")
 	}
-	bundlePath := filepath.Join(buildDir, "Main.lua")
 
-	if err := os.MkdirAll(filepath.Dir(bundlePath), 0755); err != nil {
+	// Output file uses project name
+	outputFileName := projectName + ".lua"
+	bundlePath := filepath.Join(buildDir, outputFileName)
+
+	if err := os.MkdirAll(buildDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create build directory: %v", err)
 	}
 
+	// Call Node.js bundle-worker.js for proper bundling
+	execPath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("failed to get executable path: %v", err)
+	}
+	execDir := filepath.Dir(execPath)
+	workerScript := filepath.Join(execDir, "automations", "bundle-worker.js")
+
+	// Check if worker script exists
+	if _, err := os.Stat(workerScript); err != nil {
+		return "", fmt.Errorf("bundle-worker.js not found at %s: %v", workerScript, err)
+	}
+
+	// Run bundle worker with timeout
+	nodeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(nodeCtx, "node", workerScript, projectDirAbs, entryFile)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("bundling failed: %v\nOutput: %s", err, string(output))
+	}
+
+	// Parse output - first line should be BUNDLE_SUCCESS
+	lines := strings.Split(string(output), "\n")
+	if len(lines) < 2 || lines[0] != "BUNDLE_SUCCESS" {
+		return "", fmt.Errorf("unexpected bundle output format: %s", string(output))
+	}
+
+	bundledContent := strings.Join(lines[1:], "\n")
+
+	// Write bundled content to build directory
 	if err := os.WriteFile(bundlePath, []byte(bundledContent), 0644); err != nil {
 		return "", fmt.Errorf("failed to write bundle: %v", err)
 	}
@@ -382,7 +367,7 @@ func bundleLuaProject(ctx context.Context, projectDir, entryFile, bundleOutputDi
 		return "", fmt.Errorf("deployment failed: %v", err)
 	}
 
-	return fmt.Sprintf("Bundle created: %s\nDeployed to: %s\nModules bundled: %d", bundlePath, deployPath, len(bundleCtx.Modules)), nil
+	return fmt.Sprintf("✓ Bundle created: %s\n✓ Deployed to: %s\n✓ Project: %s", bundlePath, deployPath, projectName), nil
 }
 
 func deploySingleFile(ctx context.Context, filePath, deployDir string) (string, error) {
