@@ -9,27 +9,33 @@ import tempfile
 import threading
 import queue
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Optional
+
+# Global job tracking for async bundle operations
+_bundle_jobs: dict[str, dict] = {}
 
 from .server import get_smart_context, get_types
 
 LOG = logging.getLogger("mcp_stdio")
 
-# Lua compiler detection - REQUIRES Lua 5.4+
+# Lua compiler detection - REQUIRES Lua 5.4+ (prefers 5.5)
 def find_luac() -> tuple[str, str]:
-    """Find Lua 5.4+ compiler. Returns (command, version). Rejects older versions."""
+    """Find Lua 5.4+ compiler. Returns (command, version). Rejects older versions. Prioritizes 5.5."""
     mcp_root = Path(__file__).resolve().parents[2]
     bundled_lua_dir = mcp_root / "automations" / "bin" / "lua"
     
     candidates = [
-        (str(bundled_lua_dir / "luac54.exe"), "5.4"),
-        (str(bundled_lua_dir / "luac5.4.exe"), "5.4"),
-        (str(bundled_lua_dir / "luac.exe"), "5.4"),
-        ("luac5.4", "5.4"),
-        ("luac54", "5.4"),
+        (str(bundled_lua_dir / "luac55.exe"), "5.5"),
+        (str(bundled_lua_dir / "luac5.5.exe"), "5.5"),
+        (str(bundled_lua_dir / "luac.exe"), "5.5"),
         ("luac5.5", "5.5"),
         ("luac55", "5.5"),
+        (str(bundled_lua_dir / "luac54.exe"), "5.4"),
+        (str(bundled_lua_dir / "luac5.4.exe"), "5.4"),
+        ("luac5.4", "5.4"),
+        ("luac54", "5.4"),
     ]
     
     for cmd, version in candidates:
@@ -59,13 +65,13 @@ def find_luac() -> tuple[str, str]:
     
     raise FileNotFoundError(
         "Lua 5.4+ required but not found.\n"
-        "Install Lua 5.4.2+ from: https://luabinaries.sourceforge.net/\n"
-        "Lmaobox runtime uses Lua 5.4 features (bitwise operators: &, |, ~, <<).\n"
+        "Install Lua 5.5+ from: https://luabinaries.sourceforge.net/\n"
+        "Lmaobox runtime uses Lua 5.4+ features (bitwise operators: &, |, ~, <<).\n"
         "Older Lua versions are NOT supported."
     )
 
 def _auto_setup_lua():
-    """Auto-install Lua 5.4+ if not found."""
+    """Auto-install Lua 5.4+ if not found (prefers 5.5)."""
     try:
         mcp_root = Path(__file__).resolve().parents[2]
         install_script = mcp_root / "automations" / "install_lua.py"
@@ -141,7 +147,7 @@ def handle_tools_list() -> dict:
             },
             {
                 "name": "bundle",
-                "description": "Bundle and deploy Lua to %LOCALAPPDATA%/lua. ⚠️ BLOCKS for up to 10 seconds. USAGE: Provide path to folder containing Main.lua. That folder IS the bundle root - all require() calls resolve from there. Relative paths resolve from MCP server launch directory (Path.cwd()). Requires MCP server installation with automations/bundle-and-deploy.js and node_modules.",
+                "description": "Bundle and deploy Lua to %LOCALAPPDATA%/lua. ASYNC: Returns job_id immediately - use check_bundle_status(jobId) to poll for completion. USAGE: Provide path to folder containing Main.lua. That folder IS the bundle root - all require() calls resolve from there. Relative paths resolve from MCP server launch directory (Path.cwd()). Requires MCP server installation with automations/bundle-and-deploy.js and node_modules.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -163,6 +169,20 @@ def handle_tools_list() -> dict:
                         }
                     },
                     "required": ["projectDir"]
+                }
+            },
+            {
+                "name": "check_bundle_status",
+                "description": "Check status of an async bundle job. Returns job state (running/completed/failed/timeout) and output.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "jobId": {
+                            "type": "string",
+                            "description": "Job ID returned by bundle tool"
+                        }
+                    },
+                    "required": ["jobId"]
                 }
             },
             {
@@ -266,7 +286,7 @@ def _run_luacheck(arguments: dict) -> dict:
 
 
 def _run_bundle(arguments: dict) -> dict:
-    """Run the bundle-and-deploy automation and return its output."""
+    """Run the bundle-and-deploy automation ASYNC - returns job ID immediately."""
     project_dir = arguments.get("projectDir")
     if not project_dir:
         raise ValueError(
@@ -287,7 +307,7 @@ def _run_bundle(arguments: dict) -> dict:
             f"CWD: {Path.cwd()}"
         )
 
-    # Find bundle script: first check MCP server's repo, then check PATH
+    # Find bundle script
     mcp_server_root = Path(__file__).resolve().parents[2]
     script_path = mcp_server_root / "automations" / "bundle-and-deploy.js"
 
@@ -318,115 +338,118 @@ def _run_bundle(arguments: dict) -> dict:
             deploy_path = project_path / deploy_dir
         env["DEPLOY_DIR"] = str(deploy_path.resolve())
 
-    # Run bundler from MCP server location (it needs node_modules)
-    # CRITICAL: Use temp files instead of pipes to avoid MCP STDIO deadlock
-    # MCP STDIO blocks subprocess pipes because it owns stdin/stdout
-    LOG.warning(f"[TIMEOUT_DEBUG] Starting bundle with 10s timeout for: {project_path}")
+    # Generate job ID and create temp files for output
+    job_id = str(uuid.uuid4())[:8]
+    stdout_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=f'.{job_id}.stdout')
+    stderr_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=f'.{job_id}.stderr')
+    stdout_file.close()
+    stderr_file.close()
     
-    stdout_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.stdout')
-    stderr_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.stderr')
-    
-    try:
-        stdout_file.close()
-        stderr_file.close()
-        
-        result_queue: queue.Queue = queue.Queue()
-        exception_queue: queue.Queue = queue.Queue()
-        
-        def run_subprocess():
-            """Run subprocess with file redirection to avoid STDIO pipe blocking."""
-            try:
-                with open(stdout_file.name, 'w') as out, open(stderr_file.name, 'w') as err:
-                    proc = subprocess.run(
-                        ["node", str(script_path)],
-                        cwd=str(mcp_server_root),
-                        env=env,
-                        stdout=out,
-                        stderr=err,
-                        stdin=subprocess.DEVNULL,
-                        check=False,
-                        timeout=10.0,
-                    )
-                    result_queue.put((proc.returncode, None))
-            except subprocess.TimeoutExpired:
-                result_queue.put((None, "timeout"))
-            except Exception as e:
-                result_queue.put((None, str(e)))
-        
-        thread = threading.Thread(target=run_subprocess, daemon=True)
-        thread.start()
-        thread.join(timeout=12.0)
-        
-        # Check if thread completed
-        if thread.is_alive():
-            LOG.error(f"[TIMEOUT_DEBUG] Thread alive after 12s - hard timeout triggered")
-            raise RuntimeError(
-                f"Bundle operation exceeded 12 second hard limit.\n"
-                f"project_dir: {env.get('PROJECT_DIR')}\n"
-                f"This indicates the Node.js bundler is stuck or MCP STDIO is blocking execution.\n"
-            )
-        
-        # Get result
-        if result_queue.empty():
-            raise RuntimeError(f"Bundle thread finished but no result queued.\nproject_dir: {env.get('PROJECT_DIR')}")
-        
-        returncode, error = result_queue.get()
-        
-        # Read output from temp files
-        with open(stdout_file.name, 'r') as f:
-            stdout_text = f.read()
-        with open(stderr_file.name, 'r') as f:
-            stderr_text = f.read()
-        
-        if error == "timeout":
-            raise RuntimeError(
-                f"Bundle operation timed out after 10 seconds.\n"
-                f"project_dir: {env.get('PROJECT_DIR')}\n"
-                f"Output before timeout:\n"
-                f"stdout: {stdout_text or '<none>'}\n"
-                f"stderr: {stderr_text or '<none>'}"
-            )
-        elif error:
-            raise RuntimeError(f"Bundle subprocess error: {error}\nproject_dir: {env.get('PROJECT_DIR')}")
-        
-        LOG.warning(f"[TIMEOUT_DEBUG] Bundle completed (exit {returncode})")
-        
-        # Create mock process result for compatibility
-        class ProcessResult:
-            def __init__(self, returncode, stdout, stderr):
-                self.returncode = returncode
-                self.stdout = stdout
-                self.stderr = stderr
-        
-        process = ProcessResult(returncode, stdout_text, stderr_text)
-        
-    finally:
-        # Cleanup temp files
-        try:
-            os.unlink(stdout_file.name)
-            os.unlink(stderr_file.name)
-        except:
-            pass
-
-    result = {
-        "project_dir": env.get("PROJECT_DIR"),
+    # Initialize job tracking
+    _bundle_jobs[job_id] = {
+        "status": "running",
+        "project_dir": str(project_path),
         "bundle_output_dir": env.get("BUNDLE_OUTPUT_DIR"),
         "deploy_dir": env.get("DEPLOY_DIR"),
-        "stdout": process.stdout.strip(),
-        "stderr": process.stderr.strip(),
-        "exit_code": process.returncode,
+        "stdout_file": stdout_file.name,
+        "stderr_file": stderr_file.name,
+        "start_time": time.time(),
+        "returncode": None,
+        "error": None,
+    }
+    
+    def run_bundle_async():
+        """Background thread that runs bundle and updates job status."""
+        job = _bundle_jobs[job_id]
+        try:
+            with open(job["stdout_file"], 'w') as out, open(job["stderr_file"], 'w') as err:
+                proc = subprocess.run(
+                    ["node", str(script_path)],
+                    cwd=str(mcp_server_root),
+                    env=env,
+                    stdout=out,
+                    stderr=err,
+                    stdin=subprocess.DEVNULL,
+                    check=False,
+                    timeout=30.0,  # 30s timeout for async
+                )
+                job["returncode"] = proc.returncode
+                job["status"] = "completed" if proc.returncode == 0 else "failed"
+        except subprocess.TimeoutExpired:
+            job["status"] = "timeout"
+            job["error"] = "Bundle timed out after 30 seconds"
+        except Exception as e:
+            job["status"] = "failed"
+            job["error"] = str(e)
+    
+    # Start background thread (daemon=True so it dies with main process)
+    thread = threading.Thread(target=run_bundle_async, daemon=True)
+    thread.start()
+    
+    # Return immediately with job ID
+    return {
+        "status": "started",
+        "job_id": job_id,
+        "project_dir": str(project_path),
+        "message": f"Bundle started. Poll with check_bundle_status(jobId='{job_id}') to get result.",
     }
 
-    if process.returncode != 0:
-        raise RuntimeError(
-            f"Bundle failed (exit {process.returncode}).\n"
-            f"project_dir: {result['project_dir']}\n"
-            f"bundle_output_dir: {result['bundle_output_dir'] or '<default>'}\n"
-            f"deploy_dir: {result['deploy_dir'] or '<default>'}\n"
-            f"stdout:\n{result['stdout'] or '<empty>'}\n"
-            f"stderr:\n{result['stderr'] or '<empty>'}"
-        )
 
+def _check_bundle_status(arguments: dict) -> dict:
+    """Check status of an async bundle job."""
+    job_id = arguments.get("jobId")
+    if not job_id:
+        raise ValueError("jobId is required")
+    
+    if job_id not in _bundle_jobs:
+        raise ValueError(f"Unknown job ID: {job_id}. Job may have expired or never existed.")
+    
+    job = _bundle_jobs[job_id]
+    
+    # Read current output from temp files
+    stdout_text = ""
+    stderr_text = ""
+    try:
+        if os.path.exists(job["stdout_file"]):
+            with open(job["stdout_file"], 'r') as f:
+                stdout_text = f.read()
+        if os.path.exists(job["stderr_file"]):
+            with open(job["stderr_file"], 'r') as f:
+                stderr_text = f.read()
+    except Exception as e:
+        LOG.warning(f"Failed to read job output files: {e}")
+    
+    elapsed = time.time() - job["start_time"]
+    
+    result = {
+        "job_id": job_id,
+        "status": job["status"],
+        "project_dir": job["project_dir"],
+        "bundle_output_dir": job["bundle_output_dir"],
+        "deploy_dir": job["deploy_dir"],
+        "elapsed_seconds": round(elapsed, 1),
+        "stdout": stdout_text.strip(),
+        "stderr": stderr_text.strip(),
+        "exit_code": job["returncode"],
+        "error": job["error"],
+    }
+    
+    # Cleanup completed jobs (keep temp files readable until next check)
+    if job["status"] in ("completed", "failed", "timeout"):
+        # Schedule cleanup
+        def cleanup():
+            time.sleep(5)  # Keep files for 5 more seconds
+            try:
+                os.unlink(job["stdout_file"])
+                os.unlink(job["stderr_file"])
+            except:
+                pass
+            if job_id in _bundle_jobs:
+                del _bundle_jobs[job_id]
+        
+        cleanup_thread = threading.Thread(target=cleanup, daemon=True)
+        cleanup_thread.start()
+    
     return result
 
 
@@ -456,16 +479,47 @@ def handle_tools_call(name: str, arguments: dict) -> dict:
 
     elif name == "bundle":
         result = _run_bundle(arguments)
+        # Async response - returns job ID immediately
         output_lines = [
+            f"⏳ BUNDLE STARTED (async)",
+            f"job_id: {result['job_id']}",
             f"project_dir: {result['project_dir']}",
-            f"bundle_output_dir: {result['bundle_output_dir'] or '<default>'}",
-            f"deploy_dir: {result['deploy_dir'] or '<default LocalAppData/lua>'}",
-            f"exit_code: {result['exit_code']}",
             "",
-            result["stdout"] or "<no output>",
+            result["message"],
         ]
-        if result["stderr"]:
-            output_lines.extend(["", "=== stderr ===", result["stderr"]])
+        return {"content": [{"type": "text", "text": "\n".join(output_lines)}]}
+
+    elif name == "check_bundle_status":
+        result = _check_bundle_status(arguments)
+        status_emoji = {
+            "running": "⏳",
+            "completed": "✅",
+            "failed": "❌",
+            "timeout": "⏰",
+        }.get(result["status"], "❓")
+        
+        output_lines = [
+            f"{status_emoji} BUNDLE {result['status'].upper()}",
+            f"job_id: {result['job_id']}",
+            f"elapsed: {result['elapsed_seconds']}s",
+            f"project_dir: {result['project_dir']}",
+        ]
+        
+        if result["status"] != "running":
+            output_lines.extend([
+                f"exit_code: {result['exit_code']}",
+                "",
+                result["stdout"] or "<no output>",
+            ])
+            if result["stderr"]:
+                output_lines.extend(["", "=== stderr ===", result["stderr"]])
+            if result["error"]:
+                output_lines.extend(["", "=== error ===", result["error"]])
+        else:
+            output_lines.extend(["", "Bundle still running... poll again in 1-2 seconds."])
+            if result["stdout"]:
+                output_lines.extend(["", "=== partial output ===", result["stdout"][-500:]])
+        
         return {"content": [{"type": "text", "text": "\n".join(output_lines)}]}
 
     elif name == "luacheck":

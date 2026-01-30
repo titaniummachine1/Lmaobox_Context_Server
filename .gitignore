@@ -21,12 +21,6 @@ __pycache__/
 .vscode/
 .idea/
 
-# Processing zones (input/output churn)
-processing_zone/01_TO_PROCESS/*
-processing_zone/02_IN_PROGRESS/*
-processing_zone/03_DONE/*
-RAW_NOTES/*
-
 # Data artifacts
 data/*.db
 data/*.sqlite

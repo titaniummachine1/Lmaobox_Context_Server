@@ -52,7 +52,7 @@ func main() {
 	// Add bundle tool
 	bundleTool := mcp.NewTool(
 		"bundle",
-		mcp.WithDescription("Bundle and deploy Lua to %LOCALAPPDATA%/lua. Provide path to folder containing Main.lua or main.lua (case insensitive). That folder IS the bundle root - all require() calls resolve from there."),
+		mcp.WithDescription("Bundle and deploy Lua to %LOCALAPPDATA%/lua. BLOCKS for up to 15 seconds. If timeout occurs, DO NOT retry until you fix the underlying issue (circular deps, missing files, etc). After fixing issues, you SHOULD retry bundling. Provide path to folder containing Main.lua or main.lua (case insensitive). That folder IS the bundle root - all require() calls resolve from there."),
 		mcp.WithString("projectDir",
 			mcp.Required(),
 			mcp.Description("Path to folder containing Main.lua or main.lua. ABSOLUTE paths recommended. This folder becomes the bundle root. MUST contain Main.lua/main.lua unless entryFile is specified."),
@@ -109,6 +109,22 @@ func main() {
 
 	s.AddTool(getSmartContextTool, handleGetSmartContext)
 
+	// Add trace_bundle_error tool
+	traceBundleErrorTool := mcp.NewTool(
+		"trace_bundle_error",
+		mcp.WithDescription("Trace bundled Lua error back to source file and line. Parses bundled file structure to find which source module contains the error line."),
+		mcp.WithString("bundledFilePath",
+			mcp.Required(),
+			mcp.Description("Path to bundled Lua file (e.g., C:/Users/.../AppData/Local/lua/Main.lua)"),
+		),
+		mcp.WithNumber("errorLine",
+			mcp.Required(),
+			mcp.Description("Line number from error message"),
+		),
+	)
+
+	s.AddTool(traceBundleErrorTool, handleTraceBundleError)
+
 	// Start server
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
@@ -126,8 +142,8 @@ func handleBundle(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 	bundleOutputDir, _ := req.Params.Arguments["bundleOutputDir"].(string)
 	deployDir, _ := req.Params.Arguments["deployDir"].(string)
 
-	// Create timeout context (30 seconds)
-	bundleCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Create timeout context (15 seconds - BLOCKING operation)
+	bundleCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	// Find entry file if not specified
@@ -140,10 +156,11 @@ func handleBundle(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 	}
 
 	// Use native Go bundling instead of Node.js
+	// This operation BLOCKS and will wait up to 15 seconds
 	bundleResult, err := bundleLuaProject(bundleCtx, projectDir, entryFile, bundleOutputDir, deployDir)
 	if err != nil {
 		if bundleCtx.Err() == context.DeadlineExceeded {
-			return mcp.NewToolResultError("Bundle operation timed out after 30 seconds. This usually indicates:\n1. Circular dependency loop\n2. Very large project (try splitting into smaller modules)\n3. Invalid require() paths causing infinite resolution\nCheck your dependencies for cycles and fix require() paths."), nil
+			return mcp.NewToolResultError("BUNDLE TIMEOUT (15s exceeded)\n\nLikely causes:\n1. Circular dependency in require() statements\n2. Very large project\n3. Invalid require() paths\n\nDO NOT retry immediately. Fix the issue first:\n- Check for circular dependencies (A requires B, B requires A)\n- Verify all require() paths exist\n- Split large modules into smaller files\n\nProject: " + projectDir), nil
 		}
 		return mcp.NewToolResultError(fmt.Sprintf("Bundle failed: %v", err)), nil
 	}
@@ -244,6 +261,34 @@ func handleGetSmartContext(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	return mcp.NewToolResultText(contextInfo), nil
 }
 
+func handleTraceBundleError(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	bundledFilePath, ok := req.Params.Arguments["bundledFilePath"].(string)
+	if !ok || bundledFilePath == "" {
+		return mcp.NewToolResultError("bundledFilePath is required"), nil
+	}
+
+	errorLine, ok := req.Params.Arguments["errorLine"].(float64)
+	if !ok {
+		return mcp.NewToolResultError("errorLine is required and must be a number"), nil
+	}
+
+	lineNum := int(errorLine)
+
+	// Read bundled file
+	content, err := os.ReadFile(bundledFilePath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to read bundled file: %v", err)), nil
+	}
+
+	// Parse bundle structure to find which module contains this line
+	result, err := traceBundleError(string(content), lineNum, bundledFilePath)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to trace error: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(result), nil
+}
+
 // Native Go bundling functions
 
 func bundleLuaProject(ctx context.Context, projectDir, entryFile, bundleOutputDir, deployDir string) (string, error) {
@@ -272,9 +317,23 @@ func bundleLuaProject(ctx context.Context, projectDir, entryFile, bundleOutputDi
 		Stack:       make(map[string]bool),
 	}
 
+	// Check timeout before starting
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+	}
+
 	// Validate all Lua files first
 	if err := validateAllLuaFiles(ctx, projectDirAbs); err != nil {
 		return "", fmt.Errorf("syntax validation failed: %v", err)
+	}
+
+	// Check timeout after validation
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
 	}
 
 	// Build dependency tree
@@ -282,10 +341,24 @@ func bundleLuaProject(ctx context.Context, projectDir, entryFile, bundleOutputDi
 		return "", fmt.Errorf("dependency analysis failed: %v", err)
 	}
 
+	// Check timeout after dependency analysis
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+	}
+
 	// Generate bundled output
 	bundledContent, err := generateBundledLua(bundleCtx, entryFilePath)
 	if err != nil {
 		return "", fmt.Errorf("bundle generation failed: %v", err)
+	}
+
+	// Check timeout after generation
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
 	}
 
 	// Write bundle to output directory
@@ -370,6 +443,13 @@ func buildDependencyTree(ctx context.Context, bundleCtx *BundleContext, entryFil
 }
 
 func resolveDependencies(ctx context.Context, bundleCtx *BundleContext, filePath string) error {
+	// Check timeout at start of each recursive call
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return err
@@ -725,6 +805,98 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func traceBundleError(bundleContent string, errorLine int, bundledFilePath string) (string, error) {
+	lines := strings.Split(bundleContent, "\n")
+
+	if errorLine < 1 || errorLine > len(lines) {
+		return "", fmt.Errorf("error line %d out of range (file has %d lines)", errorLine, len(lines))
+	}
+
+	// Parse bundle structure to find module boundaries
+	type ModuleInfo struct {
+		name      string
+		startLine int
+		endLine   int
+	}
+
+	var modules []ModuleInfo
+	var currentModule *ModuleInfo
+	bundleRegisterPattern := regexp.MustCompile(`__bundle_register\("([^"]+)",\s*function\(`)
+
+	// Find all modules
+	for i, line := range lines {
+		lineNum := i + 1
+
+		if matches := bundleRegisterPattern.FindStringSubmatch(line); matches != nil {
+			// Close previous module
+			if currentModule != nil {
+				currentModule.endLine = lineNum - 1
+				modules = append(modules, *currentModule)
+			}
+
+			// Start new module
+			currentModule = &ModuleInfo{
+				name:      matches[1],
+				startLine: lineNum,
+			}
+		}
+	}
+
+	// Close last module
+	if currentModule != nil {
+		currentModule.endLine = len(lines)
+		modules = append(modules, *currentModule)
+	}
+
+	// Find which module contains the error line
+	var foundModule *ModuleInfo
+	for i := range modules {
+		if errorLine >= modules[i].startLine && errorLine <= modules[i].endLine {
+			foundModule = &modules[i]
+			break
+		}
+	}
+
+	// Build result
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("=== ERROR TRACE ===\n\n"))
+	result.WriteString(fmt.Sprintf("Bundled file: %s\n", bundledFilePath))
+	result.WriteString(fmt.Sprintf("Error at line: %d\n\n", errorLine))
+
+	if foundModule != nil {
+		relativeLineInModule := errorLine - foundModule.startLine
+		result.WriteString(fmt.Sprintf("Module: %s\n", foundModule.name))
+		result.WriteString(fmt.Sprintf("Module starts at line: %d\n", foundModule.startLine))
+		result.WriteString(fmt.Sprintf("Module ends at line: %d\n", foundModule.endLine))
+		result.WriteString(fmt.Sprintf("Relative line in module: ~%d\n\n", relativeLineInModule))
+
+		if foundModule.name == "__root" {
+			result.WriteString("This is in the main entry file (Main.lua)\n\n")
+		} else {
+			result.WriteString(fmt.Sprintf("This is in module: %s\n", foundModule.name))
+			result.WriteString(fmt.Sprintf("Likely source file: %s.lua\n\n", strings.ReplaceAll(foundModule.name, ".", "/")))
+		}
+	} else {
+		result.WriteString("Module: (bundle loader code)\n")
+		result.WriteString("This error is in the bundle infrastructure, not your code.\n\n")
+	}
+
+	// Show context around error line
+	result.WriteString("=== CODE CONTEXT ===\n\n")
+	start := max(1, errorLine-5)
+	end := min(len(lines), errorLine+5)
+
+	for i := start; i <= end; i++ {
+		prefix := "    "
+		if i == errorLine {
+			prefix = ">>> "
+		}
+		result.WriteString(fmt.Sprintf("%s%4d: %s\n", prefix, i, lines[i-1]))
+	}
+
+	return result.String(), nil
 }
 
 func findLuac() string {

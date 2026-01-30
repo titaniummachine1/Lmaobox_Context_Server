@@ -1,0 +1,409 @@
+<!doctype html>
+<html class="no-js" lang="en">
+    <head>
+        
+
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+
+        
+        
+        
+    
+        
+        <script src="//a.fsdn.com/con/js/min/sf.sandiego-cmp-top.js?1768240804"></script>
+
+        
+    
+
+        
+
+    
+    
+    <link rel="stylesheet" href="//a.fsdn.com/con/css/sftheme/sandiego/cmp.css?1768240804">
+    
+    <script>
+        window.bizx.cmp.init({
+            
+            geo: {
+                is_euro_union: 1,
+                country_code2: 'PL',
+                region: '',
+            },
+        });
+    </script>
+
+
+            
+
+
+    <script>
+        bizx.cmp.ifConsent({ purposes: 'ads', vendors: 'adshield'}, function () {const script1 = document.createElement('script');
+            script1.setAttribute("async", "");
+            script1.setAttribute("id", "lihppnCNoT");
+            script1.setAttribute("data-sdk", "l/1.1.31");
+            script1.setAttribute("data-cfasync", "false");
+            script1.setAttribute("nowprocket", "");
+            script1.setAttribute("src", "https://as.sourceforge.net/sdk.js");
+            script1.setAttribute("charset", "UTF-8");
+            script1.setAttribute("data", "nxznpufsoujubuzcso8so4sbiu4nuvs6u9sbkuwsocuju5sbu9cs1u9u9ujuwsouvuju5uku9kuwsouju9vujsrbccuwsou34srsbiu4nu3sououx");
+            script1.setAttribute("onload", "(async()=>{var e,t,r,o,a;try{e=e=>{try{confirm('There was a problem loading the page. Please click OK to learn more.')?m.href=t+'?url='+o(m.href)+'&error='+o(e)+'&domain='+r:m.reload()}catch(a){location.href=t+'?eventId=&error=Vml0YWwgQVBJIGJsb2NrZWQ%3D&domain='+r}},t='https://report.error-report.com/modal',r='html-load.com',o=btoa;const n=window,i=document,s=e=>new Promise((t=>{const r=.1*e,o=e+Math.floor(2*Math.random()*r)-r;setTimeout(t,o)})),l=n.addEventListener.bind(n),d=n.postMessage.bind(n),c='message',m=location,h=Math.random,w=clearInterval,g='setAttribute';a=async a=>{try{localStorage.setItem(m.host+'_fa_'+o('last_bfa_at'),Date.now().toString())}catch(f){}setInterval((()=>{i.body&&(i.body.remove(),i.body.innerHTML='')}),100);const n=await fetch('https://error-report.com/report?type=loader_light&url='+o(m.href)+'&error='+o(a)+'&request_id='+o(Math.random().toString().slice(2)),{method:'POST'}).then((e=>e.text())),s=new Promise((e=>{l('message',(t=>{'as_modal_loaded'===t.data&&e()}))}));let d=i.createElement('iframe');d.src=t+'?url='+o(m.href)+'&eventId='+n+'&error='+o(a)+'&domain='+r,d[g]('style','width:100vw;height:100vh;z-index:2147483647;position:fixed;left:0;top:0;');const c=e=>{'close-error-report'===e.data&&(d.remove(),removeEventListener('message',c))};l('message',c),i.documentElement.appendChild(d);const h=setInterval((()=>{if(!i.contains(d))return w(h);(()=>{const e=d.getBoundingClientRect();return'none'!==getComputedStyle(d).display&&0!==e.width&&0!==e.height})()||(w(h),e(a))}),1e3);await new Promise(((e,t)=>{s.then(e),setTimeout((()=>t(a)),3e3)}))};const f=()=>new Promise(((e,t)=>{let r=h().toString(),o=h().toString();l(c,(e=>e.data===r&&d(o,'*'))),l(c,(t=>t.data===o&&e())),d(r,'*')})),p=async()=>{try{let e=!1;const t=h().toString();if(l(c,(r=>{r.data===t+'_as_res'&&(e=!0)})),d(t+'_as_req','*'),await f(),await s(500),e)return!0}catch(e){}return!1},y=[100,500,1e3],u=o('_bfa_message'+location.hostname);for(let e=0;e<=y.length&&!await p();e++){if(window[u])throw window[u];if(e===y.length-1)throw'Failed to load website properly since '+r+' is tainted. Please allow '+r;await s(y[e])}}catch(n){try{await a(n)}catch(i){e(n)}}})();");
+            script1.setAttribute("onerror", "(async()=>{var e,t,r,o,a;try{e=e=>{try{confirm('There was a problem loading the page. Please click OK to learn more.')?m.href=t+'?url='+o(m.href)+'&error='+o(e)+'&domain='+r:m.reload()}catch(a){location.href=t+'?eventId=&error=Vml0YWwgQVBJIGJsb2NrZWQ%3D&domain='+r}},t='https://report.error-report.com/modal',r='html-load.com',o=btoa;const n=window,s=document,i=JSON.parse(atob('WyJodG1sLWxvYWQuY29tIiwiZmIuaHRtbC1sb2FkLmNvbSIsImQyMGlicmVnZDVydGd6LmNsb3VkZnJvbnQubmV0IiwiY29udGVudC1sb2FkZXIuY29tIiwiZmIuY29udGVudC1sb2FkZXIuY29tIl0=')),l='addEventListener',d='setAttribute',c='getAttribute',m=location,h='attributes',u=clearInterval,p='as_retry',w=m.hostname,v=n.addEventListener.bind(n),b='__sa_'+window.btoa(window.location.href),_=()=>{const e=e=>{let t=0;for(let r=0,o=e.length;r<o;r++){t=(t<<5)-t+e.charCodeAt(r),t|=0}return t},t=Date.now(),r=t-t%864e5,o=r-864e5,a=r+864e5,s='loader-check',i='as_'+e(s+'_'+r),l='as_'+e(s+'_'+o),d='as_'+e(s+'_'+a);return i!==l&&i!==d&&l!==d&&!!(n[i]||n[l]||n[d])};if(a=async a=>{try{localStorage.setItem(m.host+'_fa_'+o('last_bfa_at'),Date.now().toString())}catch(p){}setInterval((()=>{s.body&&(s.body.remove(),s.body.innerHTML='')}),100);const n=await fetch('https://error-report.com/report?type=loader_light&url='+o(m.href)+'&error='+o(a)+'&request_id='+o(Math.random().toString().slice(2)),{method:'POST'}).then((e=>e.text())),i=new Promise((e=>{v('message',(t=>{'as_modal_loaded'===t.data&&e()}))}));let l=s.createElement('iframe');l.src=t+'?url='+o(m.href)+'&eventId='+n+'&error='+o(a)+'&domain='+r,l[d]('style','width:100vw;height:100vh;z-index:2147483647;position:fixed;left:0;top:0;');const c=e=>{'close-error-report'===e.data&&(l.remove(),removeEventListener('message',c))};v('message',c),s.documentElement.appendChild(l);const h=setInterval((()=>{if(!s.contains(l))return u(h);(()=>{const e=l.getBoundingClientRect();return'none'!==getComputedStyle(l).display&&0!==e.width&&0!==e.height})()||(u(h),e(a))}),1e3);await new Promise(((e,t)=>{i.then(e),setTimeout((()=>t(a)),3e3)}))},void 0===n[p]&&(n[p]=0),n[p]>=i.length)throw'Failed to load website properly since '+r+' is blocked. Please allow '+r;if(_())return;const g=s.querySelector('#lihppnCNoT'),y=s.createElement('script');for(let e=0;e<g[h].length;e++)y[d](g[h][e].name,g[h][e].value);const f=n[b]?.EventTarget_addEventListener||EventTarget.prototype[l],I=o(w+'_onload');n[I]&&f.call(y,'load',n[I]);const E=o(w+'_onerror');n[E]&&f.call(y,'error',n[E]);const L=new n.URL(g[c]('src'));L.host=i[n[p]++],y[d]('src',L.href),y[d]('type','text/javascript'),g[d]('id',g[c]('id')+'_'),g.parentNode.insertBefore(y,g),g.remove()}catch(n){try{await a(n)}catch(s){e(n)}}})();");
+            document.head.appendChild(script1);
+        });
+    </script>
+
+
+        <script>
+            /*global unescape, window, SF*/
+            // Setup our namespace
+            if (!window.SF) { window.SF = {}; }
+            if (!window.net) { window.net = {}; }
+            if (!window.net.sf) { window.net.sf = {}; }
+            SF.Ads = {};
+            SF.cdn = '//a.fsdn.com/con';
+            SF.alluracdn = '//a.fsdn.com/allura/cdn/allura/nf';
+            SF.deploy_time = '1768240804';
+            SF.sandiego = true;
+            SF.sandiego_chrome = true;
+            SF.variant = 'sf';
+            SF.fpid = 'aa9202ed-1e98-4c34-bac8-dbfb95efc5f1';
+            SF.billboard_route = '/software/product/$slug/';
+            
+            SF.Breakpoints = {
+              small: 0,
+              medium: 640,
+              leaderboard: 743,
+              billboard: 985,
+              large: 1053,
+              xlarge: 1295,
+              xxlarge: 1366
+            };
+            SF.initial_breakpoints_visible = {};
+            for (var bp in SF.Breakpoints) {
+                if (!SF.Breakpoints.hasOwnProperty(bp)) {
+                    continue;
+                }
+                SF.initial_breakpoints_visible[bp] = !window.matchMedia || window.matchMedia('(min-width: ' + SF.Breakpoints[bp] + 'px)').matches;
+            }
+            
+                
+                SF.Ads.viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+                SF.Ads.viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+            
+        </script>
+
+        
+        <script>
+            window.ID5EspConfig = {partnerId: 1787};
+        </script>
+        
+
+        
+<script>
+    var data = {hem: null };
+    bizx.uids.gatherAndClean(data);
+</script>
+<script>
+
+            SF.Ads.prebidOptions = {
+                showIndicators: false,
+                analytics: false,
+                timeout: 650,
+                timeouts_by_bids: {650: 3, 2000: 1, 3000: 0},
+                pbjsConfig: { 
+                },
+                uids: { 
+                    ip: "164.127.246.155",},
+            };
+
+            if (!SF.Ads.prebidOptions.uids.hem) {
+                SF.Ads.prebidOptions.uids.hem = bizx.uids.getHem();
+            }
+
+            SF.Ads.prebidUnits = [];
+            if (SF.initial_breakpoints_visible.leaderboard) {
+                var thisUnit =  {
+                    bids: [{"bidder":"sovrn","params":{"tagid":"364648"}},
+                            {"bidder":"rubicon","params":{"zoneId":"486110","sizes":[2],"position":"atf","accountId":"15680","siteId":"103240"}},
+                            {"bidder":"appnexus","params":{"placementId":9265078}},
+                            {"bidder":"pubmatic","params":{"adSlot":"4741585","publisherId":"162538"}},
+                            {"bidder":"openx","params":{"unit":"562445596","delDomain":"slashdotmedia-d.openx.net"}},
+                            {"bidder":"iionads","params":{"adUnitId":42185,"adUnitType":"Banner","host":"ads-2479q.iionads.com","publisherId":"2235706"}},
+                            {"bidder":"loopme","params":{"publisherId":"15578","bundleId":"slashdotmedia.com"}},
+                            ],
+                    code: "div-gpt-ad-1393435113147-0",
+                    tag: "SF_ProjectFiles_728x90_A",
+                    ortb2Imp: { ext: {
+                        gpid: "/41014381/Sourceforge/SF_ProjectFiles_728x90_A",
+                    } },
+                    mediaTypes: { banner: {
+                        sizes: [],
+                        pos: 1,
+                    } }
+                }; 
+                if (SF.Ads.viewportWidth >= 728 && SF.Ads.viewportHeight >= 200){
+                    thisUnit.mediaTypes.banner.sizes = [[728,90]];
+                } 
+                if (SF.Ads.viewportWidth >= 970 && SF.Ads.viewportHeight >= 901){
+                    thisUnit.mediaTypes.banner.sizes = [[728,90],[970,250]];
+                }
+
+                SF.Ads.prebidUnits.push(thisUnit);
+            }
+            if (!SF.initial_breakpoints_visible.leaderboard) {
+                var thisUnit =  {
+                    bids: [{"bidder":"sovrn","params":{"tagid":"542316"}},
+                            {"bidder":"rubicon","params":{"zoneId":"610848","sizes":[43],"position":"atf","accountId":"15680","siteId":"103240"}},
+                            {"bidder":"appnexus","params":{"placementId":12559081}},
+                            {"bidder":"pubmatic","params":{"adSlot":"4845070","publisherId":"162538"}},
+                            {"bidder":"openx","params":{"unit":"562445578","delDomain":"slashdotmedia-d.openx.net"}},
+                            {"bidder":"iionads","params":{"adUnitId":42185,"adUnitType":"Banner","host":"ads-2479q.iionads.com","publisherId":"2235706"}},
+                            {"bidder":"loopme","params":{"publisherId":"15578","bundleId":"slashdotmedia.com"}},
+                            ],
+                    code: "div-gpt-ad-1512154506943-0",
+                    tag: "SF_Mobile_320x50_A",
+                    ortb2Imp: { ext: {
+                        gpid: "/41014381/Sourceforge/SF_Mobile_320x50_A",
+                    } },
+                    mediaTypes: { banner: {
+                        sizes: [[320,50]],
+                        pos: 1,
+                    } }
+                };
+
+                SF.Ads.prebidUnits.push(thisUnit);
+            }
+            if (!SF.initial_breakpoints_visible.large) {
+                var thisUnit =  {
+                    bids: [{"bidder":"sovrn","params":{"tagid":"542317"}},
+                            {"bidder":"rubicon","params":{"zoneId":"798260","sizes":[43],"accountId":"15680","siteId":"103240"}},
+                            {"bidder":"appnexus","params":{"placementId":12559084}},
+                            {"bidder":"pubmatic","params":{"adSlot":"4845074","publisherId":"162538"}},
+                            {"bidder":"openx","params":{"unit":"562445580","delDomain":"slashdotmedia-d.openx.net"}},
+                            {"bidder":"iionads","params":{"adUnitId":42185,"adUnitType":"Banner","host":"ads-2479q.iionads.com","publisherId":"2235706"}},
+                            {"bidder":"loopme","params":{"publisherId":"15578","bundleId":"slashdotmedia.com"}},
+                            ],
+                    code: "div-gpt-ad-1512154653435-0",
+                    tag: "SF_Mobile_Multi_B",
+                    ortb2Imp: { ext: {
+                        gpid: "/41014381/Sourceforge/SF_Mobile_Multi_B",
+                    } },
+                    mediaTypes: { banner: {
+                        sizes: [[300,50],[300,250],[320,50],[320,100]],
+                        pos: 3,
+                    } }
+                };
+
+                SF.Ads.prebidUnits.push(thisUnit);
+            }
+            if (!SF.initial_breakpoints_visible.large) {
+                var thisUnit =  {
+                    bids: [{"bidder":"sovrn","params":{"tagid":"542318"}},
+                            {"bidder":"rubicon","params":{"zoneId":"798260","sizes":[43],"accountId":"15680","siteId":"103240"}},
+                            {"bidder":"appnexus","params":{"placementId":12559087}},
+                            {"bidder":"pubmatic","params":{"adSlot":"4845075","publisherId":"162538"}},
+                            {"bidder":"openx","params":{"unit":"562445582","delDomain":"slashdotmedia-d.openx.net"}},
+                            {"bidder":"iionads","params":{"adUnitId":42185,"adUnitType":"Banner","host":"ads-2479q.iionads.com","publisherId":"2235706"}},
+                            {"bidder":"loopme","params":{"publisherId":"15578","bundleId":"slashdotmedia.com"}},
+                            ],
+                    code: "div-gpt-ad-1512154755912-0",
+                    tag: "SF_Mobile_Multi_C",
+                    ortb2Imp: { ext: {
+                        gpid: "/41014381/Sourceforge/SF_Mobile_Multi_C",
+                    } },
+                    mediaTypes: { banner: {
+                        sizes: [[300,50],[300,250],[320,50],[320,100]],
+                        pos: 3,
+                    } }
+                };
+
+                SF.Ads.prebidUnits.push(thisUnit);
+            }
+            if (SF.initial_breakpoints_visible.large) {
+                var thisUnit =  {
+                    bids: [{"bidder":"sovrn","params":{"tagid":"364646"}},
+                            {"bidder":"rubicon","params":{"zoneId":"486110","sizes":[15,10],"position":"atf","accountId":"15680","siteId":"103240"}},
+                            {"bidder":"appnexus","params":{"placementId":9265076}},
+                            {"bidder":"pubmatic","params":{"adSlot":"4741583","publisherId":"162538"}},
+                            {"bidder":"openx","params":{"unit":"562445591","delDomain":"slashdotmedia-d.openx.net"}},
+                            {"bidder":"iionads","params":{"adUnitId":42185,"adUnitType":"Banner","host":"ads-2479q.iionads.com","publisherId":"2235706"}},
+                            {"bidder":"loopme","params":{"publisherId":"15578","bundleId":"slashdotmedia.com"}},
+                            ],
+                    code: "div-gpt-ad-1392147725721-0",
+                    tag: "SF_ProjectFiles_300x250_A",
+                    ortb2Imp: { ext: {
+                        gpid: "/41014381/Sourceforge/SF_ProjectFiles_300x250_A",
+                    } },
+                    mediaTypes: { banner: {
+                        sizes: [[300,250],[300,600]],
+                        pos: 1,
+                    } }
+                };
+
+                SF.Ads.prebidUnits.push(thisUnit);
+            }
+            if (SF.initial_breakpoints_visible.large) {
+                var thisUnit =  {
+                    bids: [{"bidder":"sovrn","params":{"tagid":"364647"}},
+                            {"bidder":"rubicon","params":{"zoneId":"486112","sizes":[15],"accountId":"15680","siteId":"103240"}},
+                            {"bidder":"appnexus","params":{"placementId":9265082}},
+                            {"bidder":"pubmatic","params":{"adSlot":"4741584","publisherId":"162538"}},
+                            {"bidder":"openx","params":{"unit":"562445593","delDomain":"slashdotmedia-d.openx.net"}},
+                            {"bidder":"iionads","params":{"adUnitId":42185,"adUnitType":"Banner","host":"ads-2479q.iionads.com","publisherId":"2235706"}},
+                            {"bidder":"loopme","params":{"publisherId":"15578","bundleId":"slashdotmedia.com"}},
+                            ],
+                    code: "div-gpt-ad-1392148208789-0",
+                    tag: "SF_ProjectFiles_300x250_B",
+                    ortb2Imp: { ext: {
+                        gpid: "/41014381/Sourceforge/SF_ProjectFiles_300x250_B",
+                    } },
+                    mediaTypes: { banner: {
+                        sizes: [[300,250]],
+                        pos: 6,
+                    } }
+                };
+
+                SF.Ads.prebidUnits.push(thisUnit);
+            }
+            SF.Ads.prebidAdjustments = {"bidder_deflations":{"aardvark":1,"aol":0.98,"appnexus":1.07,"brealtime":0.98,"districtm":1.04,"districtmdmx":1.08,"emxdigital":1,"indexex#hange":0.98,"indexexchange":0.95,"komoona":0.92,"oftmedia":0.9,"onefiftytwo":0.9,"pubmatic":1,"pulsepoint":0.93,"rhythmone":0.85,"rubicon":1.23,"rubiconlite":1,"sharethrough":1.07,"smartadserver":1.15,"sovrn":1.25,"springserve":0.001},"inflation":1,"floor":0.02};
+        </script>
+
+        
+
+        
+            <script id="pbjs_script" data-dom="https://d3tglifpd8whs6.cloudfront.net"  src="//a.fsdn.com/con/js/sftheme/vendor/bizx-prebid.js?1768240804"></script>
+        
+        <script>
+            function logAdsConsent(msg) {
+            }
+            bizx.cmp.ifConsent({ purposes: 'all', vendors: 'prebid'}, function () { // hasConsentFn
+                if (window.bizxPrebid) {
+                    window.bizxPrebid.Ads.initPrebid(window.bizxPrebid.adUnits);
+                }
+                
+                    
+                    var link = document.createElement("link");
+                    link.rel = "preload";
+                    link.as = "script";
+                    link.href = 'https://securepubads.g.doubleclick.net/tag/js/gpt.js';
+                    document.head.appendChild(link);
+                
+                logAdsConsent('pageview with ads consent');
+            }, function() { // rejectedFn
+                // no 'prebid' consent (e.g. region without prebid consent string support) but try GPT directly
+                bizx.cmp.ifConsent({ purposes: 'all', vendors: 'google-ads'}, function () { // hasConsentFn
+                    bizx.cmp.embedScript('https://securepubads.g.doubleclick.net/tag/js/gpt.js');
+                    logAdsConsent('pageview without prebid consent but able to run GPT');
+                }, function() { // rejectedFn
+                    logAdsConsent('pageview without ads consent');
+                }, null,
+                function() { // unknownFn
+                    logAdsConsent('pageview without prebid consent and UNKNOWN ads consent');
+                });
+            }, null,
+            function() { // unknownFn
+                logAdsConsent('pageview with UNKNOWN ads consent');
+            });
+            </script>
+        
+            
+    
+    
+    
+    
+    
+    
+    
+    
+    <link rel="stylesheet" href="//a.fsdn.com/con/css/lato.css?1768240804">
+
+        
+        
+        
+        <link rel="stylesheet" href="//a.fsdn.com/con/css/sandiego.css?1768240804">
+        
+        <link rel="stylesheet" href="//a.fsdn.com/con/css/disallow.css?1768240804">
+
+        
+        
+        <meta name="description" content="LuaBinaries is a distribution of the Lua libraries and executables compiled for several platforms.">
+        <meta name="keywords" content="Interpreters, Libraries,  Open Source, Open Source Software, Development, Community, Source Code, Secure,  Downloads, Free Software">
+    
+    <link rel="canonical" href="https://sourceforge.net/projects/luabinaries/files/">
+        <title>LuaBinaries -  Browse Files at SourceForge.net</title>
+        <link rel="icon" sizes="180x180" href="//a.fsdn.com/con/img/sandiego/logo-180x180.png" type="image/png">
+<link rel="icon" sizes="any" href="//a.fsdn.com/con/img/sandiego/svg/originals/sf-icon-orange-no_sf.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" sizes="180x180" href="//a.fsdn.com/con/img/sandiego/logo-180x180.png">
+<link rel="mask-icon" href="//a.fsdn.com/con/img/sandiego/svg/originals/sf-icon-orange-no_sf.svg" color="#FF6600">
+        
+        <script>
+            /*global unescape, window, console, jQuery, $, net, SF, bizx  */
+            if (!window.SF) {
+                window.SF = {};
+            }SF.EU_country_codes = ["WF","CY","SH","LT","NL","GP","GS","LI","CW","RO","AX","SX","LV","NO","MQ","GB","FI","GI","HU","MT","AT","ME","TF","HR","MS","VG","TC","IE","BG","ES","FK","DK","PT","BL","GG","SK","PF","LU","GR","SE","AI","MF","PN","CH","EE","IT","IS","KY","AW","FR","GL","PL","DE","IO","SI","PM","NC","GF","BE","JE","BM","YT","RE","CZ"];
+            SF.unknown_country_codes = ["","A1","A2","O1"];
+        </script>
+        
+    
+        
+        <script src="//a.fsdn.com/con/js/min/sf.sandiego-head.js?1768240804"></script>
+
+        
+    
+
+
+        <style>.J1b5c3a4f7062b7e2a7db176eb347e57376f37c27 { display: none !important; }</style>
+
+        
+<script>SF.adblock = true;</script>  
+<script src="//a.fsdn.com/con/js/adpopup.js?1768240804"></script>
+
+
+
+<script>
+       /*global Foundation */
+           /*global googletag, bizxPrebid */
+            SF.Ads.gptExpected();
+            SF.Ads.usePrebid = true;
+
+       var gptadslots=[];
+       var gptadHandlers={};
+       var gptadRenderers=[];
+       SF.Ads.slotsById = {};
+       SF.Ads.idsByPath = {};
+
+        googletag.cmd.push(function() {
+            var leaderboard = googletag.sizeMapping()
+                .addSize([970, 901], [[728,90],[970,250]])
+                .addSize([728, 200], [[728,90]])
+                .build();
+            var leaderboardInContent = googletag.sizeMapping()
+                .addSize([1280, 200], [[728,90],[970,250]])
+                .addSize([728, 200], [[728,90]])
+                .build();
+
+                googletag.pubads()
+                .setForceSafeFrame(true).setTargeting('usingSafeFrame','1')
+                .setSafeFrameConfig({
+                        allowOverlayExpansion: true,
+                        allowPushExpansion: true,
+                        sandbox: true
+                });
+
+                var thisSlot;
+                thisSlot = googletag.defineSlot('/41014381/Sourceforge/SF_ProjectFiles_GEL_A',"fluid",'div-gpt-ad-1715706242161-0')
+                                                        .addService(googletag.pubads())
+                                                            .setTargeting('oss_tpc',["Interpreters","Libraries","Software Development"])
+                                                            .setTargeting('shortname',"luabinaries")
+                                                            .setTargeting('dc_ref',"https://sourceforge.net/projects/luabinaries/files/")
+                                                            .setTargeting('sz',"fluid")
+                                                            .setTargeting('page_type',"pg_files");
+                gptadslots.push(thisSlot);
+                SF.Ads.slotsById['div-gpt-ad-1715706242161-0'] = thisSlot;
+                SF.Ads.idsByPath['/41014381/Sourceforge/SF_ProjectFiles_GEL_A'] = 'div-gpt-ad-1715706242161-0';
+                thisSlot = googletag.defineSlot('/41014381/Sourceforge/SF_ProjectFiles_GEL_B',"fluid",'div-gpt-ad-1715706307693-0')
+                                                        .addService(googletag.pubads())
+                                                            .setTargeting('oss_tpc',["Interpreters","Libraries","Software Development"])
+                                                            .setTargeting('shortname',"luabinaries")
+                                                           
