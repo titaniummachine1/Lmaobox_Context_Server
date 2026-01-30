@@ -202,6 +202,24 @@ def handle_tools_list() -> dict:
                     },
                     "required": ["filePath"]
                 }
+            },
+            {
+                "name": "trace_bundle_error",
+                "description": "Trace bundled Lua error back to source file and line. Parses bundled file structure to find which source module contains the error line.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "bundledFilePath": {
+                            "type": "string",
+                            "description": "Path to bundled Lua file (e.g., C:/Users/.../AppData/Local/lua/Main.lua)"
+                        },
+                        "errorLine": {
+                            "type": "number",
+                            "description": "Line number from error message"
+                        }
+                    },
+                    "required": ["bundledFilePath", "errorLine"]
+                }
             }
         ]
     }
@@ -283,6 +301,73 @@ def _run_luacheck(arguments: dict) -> dict:
             "exit_code": process.returncode,
             "valid": process.returncode == 0
         }
+
+
+def _trace_bundle_error(arguments: dict) -> dict:
+    """Trace bundled error back to source file using Go binary."""
+    bundled_file_path = arguments.get("bundledFilePath")
+    error_line = arguments.get("errorLine")
+    
+    if not bundled_file_path:
+        raise ValueError("bundledFilePath is required")
+    if error_line is None:
+        raise ValueError("errorLine is required")
+    
+    bundled_path = Path(bundled_file_path).expanduser().resolve()
+    if not bundled_path.exists():
+        raise FileNotFoundError(f"Bundled file not found: {bundled_path}")
+    
+    # Use Go binary for trace_bundle_error
+    mcp_server_root = Path(__file__).resolve().parents[2]
+    go_binary = mcp_server_root / "lmaobox-context-server.exe"
+    
+    if not go_binary.exists():
+        raise FileNotFoundError(f"Go binary not found: {go_binary}")
+    
+    # Create MCP request for trace_bundle_error
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "trace_bundle_error",
+            "arguments": {
+                "bundledFilePath": str(bundled_path),
+                "errorLine": int(error_line)
+            }
+        }
+    }
+    
+    try:
+        proc = subprocess.run(
+            [str(go_binary)],
+            input=json.dumps(request),
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            check=False
+        )
+        
+        # Parse response
+        for line in proc.stdout.split('\n'):
+            if line.strip():
+                try:
+                    response = json.loads(line)
+                    if "result" in response:
+                        return {
+                            "bundled_file": str(bundled_path),
+                            "error_line": int(error_line),
+                            "trace": response["result"]["content"][0]["text"]
+                        }
+                    elif "error" in response:
+                        raise RuntimeError(response["error"]["message"])
+                except json.JSONDecodeError:
+                    continue
+        
+        raise RuntimeError(f"Failed to parse Go binary response: {proc.stdout}")
+        
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Trace operation timed out")
 
 
 def _run_bundle(arguments: dict) -> dict:
@@ -542,6 +627,10 @@ def handle_tools_call(name: str, arguments: dict) -> dict:
         if result["valid"] and not result["stdout"] and not result["stderr"]:
             output_lines.append("No errors found.")
         return {"content": [{"type": "text", "text": "\n".join(output_lines)}]}
+
+    elif name == "trace_bundle_error":
+        result = _trace_bundle_error(arguments)
+        return {"content": [{"type": "text", "text": result["trace"]}]}
 
     else:
         raise ValueError(f"Unknown tool: {name}")
