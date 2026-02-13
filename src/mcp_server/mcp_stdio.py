@@ -220,6 +220,46 @@ def handle_tools_list() -> dict:
                     },
                     "required": ["bundledFilePath", "errorLine"]
                 }
+            },
+            {
+                "name": "lua_execute",
+                "description": "Execute Lua code in Lmaobox remotely. Requires lua_runner_helper.lua to be loaded in Lmaobox. Returns execution ID - use lua_get_status to check results.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "script": {
+                            "type": "string",
+                            "description": "Lua code to execute in Lmaobox"
+                        },
+                        "scriptId": {
+                            "type": "string",
+                            "description": "Optional identifier for this script execution"
+                        }
+                    },
+                    "required": ["script"]
+                }
+            },
+            {
+                "name": "lua_get_status",
+                "description": "Get status and output of a remote Lua execution by ID. Returns output, errors, and execution results.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "executionId": {
+                            "type": "string",
+                            "description": "Execution ID returned by lua_execute"
+                        }
+                    },
+                    "required": ["executionId"]
+                }
+            },
+            {
+                "name": "lua_get_runner_state",
+                "description": "Check if Lua runner is connected and ready. Returns server status and current state.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
             }
         ]
     }
@@ -538,6 +578,81 @@ def _check_bundle_status(arguments: dict) -> dict:
     return result
 
 
+def _lua_execute(arguments: dict) -> dict:
+    """Execute Lua code remotely in Lmaobox."""
+    import urllib.request
+    import urllib.error
+
+    script = arguments.get("script", "")
+    script_id = arguments.get("scriptId")
+
+    if not script:
+        raise ValueError("script is required")
+
+    # The HTTP server runs on port 27181 (MCP server)
+    url = "http://127.0.0.1:27181/lua/execute"
+    data = json.dumps({"script": script, "script_id": script_id}).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as response:
+            result = json.loads(response.read().decode("utf-8"))
+            return result
+    except urllib.error.HTTPError as e:
+        if e.code == 503:
+            return {
+                "error": "Lua runner not available",
+                "message": "Lmaobox helper script not loaded. Run 'lua_load lua_runner_helper.lua' in TF2 console.",
+                "hint": "The lua_runner_helper.lua must be loaded in Lmaobox for remote execution to work."
+            }
+        raise RuntimeError(f"HTTP {e.code}: {e.read().decode()}")
+    except Exception as e:
+        return {
+            "error": "Failed to execute",
+            "message": str(e),
+            "hint": "Ensure MCP server is running and lua_runner_helper.lua is loaded in Lmaobox."
+        }
+
+
+def _lua_get_status(arguments: dict) -> dict:
+    """Get status of a Lua execution."""
+    import urllib.request
+
+    execution_id = arguments.get("executionId", "")
+    if not execution_id:
+        raise ValueError("executionId is required")
+
+    url = f"http://127.0.0.1:27181/lua/status?id={execution_id}"
+
+    try:
+        with urllib.request.urlopen(url, timeout=5.0) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _lua_get_runner_state() -> dict:
+    """Get Lua runner state."""
+    import urllib.request
+
+    url = "http://127.0.0.1:27181/lua/state"
+
+    try:
+        with urllib.request.urlopen(url, timeout=5.0) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        return {
+            "server_running": False,
+            "error": str(e),
+            "hint": "MCP server may not be running or Lua runner failed to start."
+        }
+
+
 def handle_tools_call(name: str, arguments: dict) -> dict:
     """Handle tool call."""
     if name == "get_types":
@@ -631,6 +746,18 @@ def handle_tools_call(name: str, arguments: dict) -> dict:
     elif name == "trace_bundle_error":
         result = _trace_bundle_error(arguments)
         return {"content": [{"type": "text", "text": result["trace"]}]}
+
+    elif name == "lua_execute":
+        result = _lua_execute(arguments)
+        return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+
+    elif name == "lua_get_status":
+        result = _lua_get_status(arguments)
+        return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+
+    elif name == "lua_get_runner_state":
+        result = _lua_get_runner_state()
+        return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
 
     else:
         raise ValueError(f"Unknown tool: {name}")

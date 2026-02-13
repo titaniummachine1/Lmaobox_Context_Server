@@ -1,7 +1,8 @@
-# MCP Server - Updated with improved library search prioritization
+# MCP Server - Updated with Lua Runner integration
 import json
 import logging
 import sqlite3
+import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -17,6 +18,9 @@ from .config import (
     SMART_CONTEXT_DIR,
     TYPES_DIR,
 )
+
+# Import Lua runner
+from .lua_runner import LuaRunnerServer, ExecutionState, get_runner
 
 LOG = logging.getLogger("mcp_server")
 
@@ -599,23 +603,266 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                 self._json(500, {"error": str(exc)})
             return
 
+        # Lua Runner: Get execution status
+        if path == "/lua/status":
+            exec_id = (query.get("id") or [""])[0]
+            if not exec_id:
+                self._json(400, {"error": "id query parameter is required"})
+                return
+            try:
+                runner = get_runner()
+                result = runner.results.get(exec_id)
+                if result:
+                    self._json(200, {
+                        "execution_id": exec_id,
+                        "success": result.success,
+                        "output": result.output,
+                        "errors": result.errors,
+                        "duration_ms": result.duration_ms,
+                        "callbacks_registered": result.callbacks_registered
+                    })
+                else:
+                    self._json(404, {"error": "Execution ID not found"})
+            except Exception as exc:
+                LOG.exception("lua/status failed")
+                self._json(500, {"error": str(exc)})
+            return
+
+        # Lua Runner: Get debug session status
+        if path == "/lua/debug_status":
+            try:
+                runner = get_runner()
+                summary = runner.get_debug_summary()
+                if summary:
+                    self._json(200, summary)
+                else:
+                    self._json(200, {"active": False, "message": "No debug session"})
+            except Exception as exc:
+                LOG.exception("lua/debug_status failed")
+                self._json(500, {"error": str(exc)})
+            return
+
+        # Lua Runner: Get runner state
+        if path == "/lua/state":
+            try:
+                runner = get_runner()
+                self._json(200, {
+                    "server_running": runner._server is not None,
+                    "state": runner.state.name if runner.state else "unknown",
+                    "current_script_id": runner.current_script_id,
+                    "pending_results": len(runner.results)
+                })
+            except Exception as exc:
+                LOG.exception("lua/state failed")
+                self._json(500, {"error": str(exc)})
+            return
+
         self._json(404, {"error": "not found"})
 
-    def log_message(self, fmt, *args):  # noqa: D401, N802
-        LOG.info("%s - %s", self.address_string(), fmt % args)
+    def do_POST(self):  # noqa: N802 - http handler naming
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+        path = parsed.path
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length).decode(DEFAULT_ENCODING) if content_length > 0 else ""
+
+        # Lua Runner: Execute script
+        if path == "/lua/execute":
+            try:
+                data = json.loads(body) if body else {}
+                script = data.get("script", "")
+                script_id = data.get("script_id")
+
+                if not script:
+                    self._json(400, {"error": "script is required"})
+                    return
+
+                runner = get_runner()
+                if not runner._server:
+                    self._json(503, {
+                        "error": "Lua runner not available",
+                        "message": "Script execution unavailable. Load lua_runner_helper.lua in Lmaobox to enable remote execution.",
+                        "hint": "The Lua runner server could not start. This is normal if the helper isn't loaded. All other MCP features work fine."
+                    })
+                    return
+
+                exec_id = runner.execute(script, script_id)
+                self._json(200, {
+                    "success": True,
+                    "execution_id": exec_id,
+                    "status": "pending",
+                    "message": "Script queued for execution in Lmaobox."
+                })
+            except json.JSONDecodeError:
+                self._json(400, {"error": "Invalid JSON body"})
+            except Exception as exc:
+                LOG.exception("lua/execute failed")
+                self._json(500, {"error": str(exc)})
+            return
+
+        # Lua Runner: Execute bundled project
+        if path == "/lua/execute_bundle":
+            try:
+                runner = get_runner()
+                if not runner._server:
+                    self._json(503, {
+                        "error": "Lua runner not available",
+                        "message": "Bundle execution unavailable. Load lua_runner_helper.lua in Lmaobox to enable remote execution.",
+                        "hint": "The Lua runner server could not start. This is normal if the helper isn't loaded. All other MCP features work fine."
+                    })
+                    return
+
+                data = json.loads(body) if body else {}
+                project_dir = data.get("project_dir", "")
+                entry_file = data.get("entry_file", "Main.lua")
+
+                if not project_dir:
+                    self._json(400, {"error": "project_dir is required"})
+                    return
+
+                import subprocess
+                import os
+
+                project_name = os.path.basename(project_dir)
+                build_dir = os.path.join(project_dir, "build")
+                output_file = os.path.join(build_dir, f"{project_name}.lua")
+
+                # Run bundle-and-deploy in dry-run mode
+                env = os.environ.copy()
+                env["PROJECT_DIR"] = project_dir
+                env["ENTRY_FILE"] = entry_file
+                env["DRY_RUN"] = "true"
+                env["BUNDLE_OUTPUT_DIR"] = build_dir
+
+                result = subprocess.run(
+                    ["node", "automations/bundle-and-deploy.js"],
+                    capture_output=True,
+                    text=True,
+                    cwd=str(ROOT_DIR),
+                    env=env,
+                    timeout=60
+                )
+
+                if result.returncode != 0:
+                    self._json(500, {
+                        "error": "Bundle failed",
+                        "details": result.stderr or result.stdout
+                    })
+                    return
+
+                # Read bundled Lua from output file
+                try:
+                    with open(output_file, "r", encoding="utf-8") as f:
+                        bundled_lua = f.read()
+                except FileNotFoundError:
+                    self._json(500, {"error": f"Bundle output not found at {output_file}"})
+                    return
+
+                if not bundled_lua:
+                    self._json(500, {"error": "Bundle output is empty"})
+                    return
+
+                # Execute the bundled script
+                exec_id = runner.execute(bundled_lua, f"bundle_{project_name}")
+                self._json(200, {
+                    "success": True,
+                    "execution_id": exec_id,
+                    "bundled_size": len(bundled_lua),
+                    "status": "pending"
+                })
+            except subprocess.TimeoutExpired:
+                self._json(500, {"error": "Bundle operation timed out"})
+            except Exception as exc:
+                LOG.exception("lua/execute_bundle failed")
+                self._json(500, {"error": str(exc)})
+            return
+
+        # Lua Runner: Start debug session
+        if path == "/lua/debug":
+            try:
+                runner = get_runner()
+                if not runner._server:
+                    self._json(503, {
+                        "error": "Lua runner not available",
+                        "message": "Debug session unavailable. Load lua_runner_helper.lua in Lmaobox to enable remote execution.",
+                        "hint": "The Lua runner server could not start. This is normal if the helper isn't loaded. All other MCP features work fine."
+                    })
+                    return
+
+                data = json.loads(body) if body else {}
+                duration = data.get("duration_seconds", 60)
+
+                session_id = runner.start_debug_session(duration)
+                self._json(200, {
+                    "success": True,
+                    "session_id": session_id,
+                    "duration_seconds": duration,
+                    "status": "debugging"
+                })
+            except Exception as exc:
+                LOG.exception("lua/debug failed")
+                self._json(500, {"error": str(exc)})
+            return
+
+        # Lua Runner: Stop debug session
+        if path == "/lua/debug_stop":
+            try:
+                runner = get_runner()
+                result = runner.stop_debug_session()
+                if result:
+                    self._json(200, {
+                        "success": True,
+                        "session_id": result.get("script_id"),
+                        "errors_caught": len(result.get("errors", [])),
+                        "output_lines": len(result.get("output", []))
+                    })
+                else:
+                    self._json(200, {"success": False, "message": "No active debug session"})
+            except Exception as exc:
+                LOG.exception("lua/debug_stop failed")
+                self._json(500, {"error": str(exc)})
+            return
+
+        self._json(404, {"error": "not found"})
 
 
 def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     SMART_CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    server = HTTPServer((host, port), MCPRequestHandler)
+    # Start Lua runner server (optional - server works without it)
+    runner = get_runner()
+    try:
+        if runner.start():
+            LOG.info("Lua runner server started on port %s", runner.PORT)
+        else:
+            LOG.warning("Lua runner server failed to start - script execution will be unavailable")
+    except Exception as exc:
+        LOG.warning("Lua runner server failed to start: %s - script execution will be unavailable", exc)
+        # Ensure runner is marked as not running
+        runner._server = None
+
+    try:
+        server = HTTPServer((host, port), MCPRequestHandler)
+    except OSError as e:
+        if "Only one usage" in str(e) or "Address already in use" in str(e):
+            print(f"\n❌ ERROR: Port {port} is already in use!")
+            print(f"\nAnother MCP server is probably already running.")
+            print(f"Check with: python -c \"import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:{port}/health').read())\"")
+            print(f"\nTo kill existing processes:")
+            print(f"  PowerShell: Get-Process python | Stop-Process -Force")
+            print(f"  Or: taskkill /F /IM python.exe")
+            sys.exit(1)
+        raise
+
     LOG.info("MCP server listening on http://%s:%s", host, port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         LOG.info("Shutting down MCP server")
     finally:
+        if runner._server:
+            runner.stop()
         server.server_close()
 
 

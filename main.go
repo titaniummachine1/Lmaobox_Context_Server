@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -26,20 +27,6 @@ type BundleRequest struct {
 	EntryFile       string `json:"entryFile,omitempty"`
 	BundleOutputDir string `json:"bundleOutputDir,omitempty"`
 	DeployDir       string `json:"deployDir,omitempty"`
-}
-
-type LuaModule struct {
-	FilePath string
-	Content  string
-	Requires []string
-}
-
-type BundleContext struct {
-	ProjectDir  string
-	SearchPaths []string
-	Modules     map[string]*LuaModule
-	Visited     map[string]bool
-	Stack       map[string]bool
 }
 
 func main() {
@@ -338,36 +325,79 @@ func bundleLuaProject(ctx context.Context, projectDir, entryFile, bundleOutputDi
 		return "", fmt.Errorf("bundle-worker.js not found at %s: %v", workerScript, err)
 	}
 
-	// Run bundle worker with timeout
+	// Create temporary stubs for global modules (exist in deploy dir but not project)
+	globalModules := findGlobalModulesInProject(projectDirAbs)
+	var stubFiles []string
+	for _, moduleName := range globalModules {
+		modulePath := strings.ReplaceAll(moduleName, ".", string(filepath.Separator))
+		stubPath := filepath.Join(projectDirAbs, modulePath+".lua")
+		stubDir := filepath.Dir(stubPath)
+		if _, err := os.Stat(stubPath); err == nil {
+			continue // file already exists in project, not a global stub
+		}
+		if err := os.MkdirAll(stubDir, 0755); err != nil {
+			continue
+		}
+		stubContent := fmt.Sprintf("-- Temporary stub for global module '%s'\nreturn {}", moduleName)
+		if err := os.WriteFile(stubPath, []byte(stubContent), 0644); err != nil {
+			continue
+		}
+		stubFiles = append(stubFiles, stubPath)
+	}
+
+	// Clean up stubs on exit regardless of success/failure
+	defer func() {
+		for _, stub := range stubFiles {
+			os.Remove(stub)
+		}
+	}()
+
 	nodeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	// Use separate stdout/stderr pipes to avoid mixing streams
 	cmd := exec.CommandContext(nodeCtx, "node", workerScript, projectDirAbs, entryFile)
-	output, err := cmd.CombinedOutput()
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err = cmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("bundling failed: %v\nOutput: %s", err, string(output))
+		stderrStr := strings.TrimSpace(stderrBuf.String())
+		return "", fmt.Errorf("bundling failed: %v\nStderr: %s", err, stderrStr)
 	}
 
-	// Parse output - first line should be BUNDLE_SUCCESS
-	lines := strings.Split(string(output), "\n")
-	if len(lines) < 2 || lines[0] != "BUNDLE_SUCCESS" {
-		return "", fmt.Errorf("unexpected bundle output format: %s", string(output))
+	// Parse stdout only — trim \r for Windows compatibility
+	stdoutStr := stdoutBuf.String()
+	lines := strings.Split(stdoutStr, "\n")
+	if len(lines) < 2 || strings.TrimRight(lines[0], "\r") != "BUNDLE_SUCCESS" {
+		return "", fmt.Errorf("unexpected bundle output format.\nStdout: %s\nStderr: %s", stdoutStr, stderrBuf.String())
 	}
 
 	bundledContent := strings.Join(lines[1:], "\n")
 
-	// Write bundled content to build directory
+	// Strip global module registrations from bundled output
+	for _, moduleName := range globalModules {
+		escaped := regexp.QuoteMeta(moduleName)
+		pattern := regexp.MustCompile(`__bundle_register\("` + escaped + `",\s*function\([^)]*\)[\s\S]*?\nend\)\s*`)
+		bundledContent = pattern.ReplaceAllString(bundledContent, "")
+	}
+
 	if err := os.WriteFile(bundlePath, []byte(bundledContent), 0644); err != nil {
 		return "", fmt.Errorf("failed to write bundle: %v", err)
 	}
 
-	// Deploy bundle
 	deployPath, err := deployBundle(ctx, bundlePath, deployDir)
 	if err != nil {
 		return "", fmt.Errorf("deployment failed: %v", err)
 	}
 
-	return fmt.Sprintf("✓ Bundle created: %s\n✓ Deployed to: %s\n✓ Project: %s", bundlePath, deployPath, projectName), nil
+	var resultMsg strings.Builder
+	resultMsg.WriteString(fmt.Sprintf("✓ Bundle created: %s\n✓ Deployed to: %s\n✓ Project: %s", bundlePath, deployPath, projectName))
+	if len(globalModules) > 0 {
+		resultMsg.WriteString(fmt.Sprintf("\n✓ Global modules preserved for runtime: %s", strings.Join(globalModules, ", ")))
+	}
+	return resultMsg.String(), nil
 }
 
 func deploySingleFile(ctx context.Context, filePath, deployDir string) (string, error) {
