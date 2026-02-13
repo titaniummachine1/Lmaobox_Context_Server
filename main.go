@@ -22,13 +22,6 @@ const (
 	SERVER_VERSION = "1.0.0"
 )
 
-type BundleRequest struct {
-	ProjectDir      string `json:"projectDir"`
-	EntryFile       string `json:"entryFile,omitempty"`
-	BundleOutputDir string `json:"bundleOutputDir,omitempty"`
-	DeployDir       string `json:"deployDir,omitempty"`
-}
-
 type LuaModule struct {
 	FilePath string
 	Content  string
@@ -156,8 +149,6 @@ func handleBundle(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 		}
 	}
 
-	// Use native Go bundling instead of Node.js
-	// This operation BLOCKS and will wait up to 15 seconds
 	bundleResult, err := bundleLuaProject(bundleCtx, projectDir, entryFile, bundleOutputDir, deployDir)
 	if err != nil {
 		if bundleCtx.Err() == context.DeadlineExceeded {
