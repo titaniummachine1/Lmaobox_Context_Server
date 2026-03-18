@@ -9,7 +9,7 @@
 
 ## Data Layout
 
-- Curated smart context files: `data/smart_context/`
+- Curated smart context files (types-mirrored): `data/smart_context/lmaobox_lua_api/`
 - Upstream docs mirror (install-time sync): `data/upstream_docs/lbox-src-docs/`
 - Generated types for symbol lookup: `types/lmaobox_lua_api/`
 - Metadata/index files: `types/docs-index.json`
@@ -17,7 +17,7 @@
 ## Tool Responsibilities
 
 - `get_types`: returns type signature and related constants using DB and type-file fallback scanning.
-- `get_smart_context`: resolves closest matching markdown context in `data/smart_context/`.
+- `get_smart_context`: composes base type context from `get_types` plus optional additive markdown from mirrored smart-context files.
 - `bundle`: runs Node bundler automation from `automations/bundle-and-deploy.js`.
 - `luacheck`: validates Lua syntax with Lua 5.4+ compiler; optional bundle dry-run.
 

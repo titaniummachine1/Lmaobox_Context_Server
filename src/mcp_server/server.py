@@ -475,9 +475,43 @@ def get_types(symbol: str):
 
 def _smart_context_candidates(symbol: str):
     normalized = symbol.strip().replace("::", ".").replace("/", ".")
+    if not normalized:
+        return
+
+    # Preferred layout: mirror types/lmaobox_lua_api/* with additive markdown files.
+    mirror_root = SMART_CONTEXT_DIR / "lmaobox_lua_api"
+    parts = normalized.split(".")
+
+    if len(parts) > 1:
+        namespace = parts[0]
+        namespace_lower = namespace.lower()
+        nested = parts[1:-1]
+        leaf = parts[-1] + ".md"
+
+        yield mirror_root / "Lua_Libraries" / namespace / Path(*nested) / leaf
+        yield mirror_root / "Lua_Classes" / namespace / Path(*nested) / leaf
+        yield mirror_root / "entity_props" / namespace / Path(*nested) / leaf
+        if namespace_lower == "callbacks":
+            yield mirror_root / "Lua_Callbacks" / leaf
+        if namespace_lower == "constants":
+            yield mirror_root / "constants" / leaf
+    else:
+        leaf = parts[0] + ".md"
+        if parts[0].startswith("E_"):
+            yield mirror_root / "constants" / leaf
+
+        yield mirror_root / "Lua_Globals" / leaf
+        yield mirror_root / "Lua_Callbacks" / leaf
+        yield mirror_root / "Lua_Classes" / leaf
+        yield mirror_root / "Lua_Libraries" / leaf
+        yield mirror_root / "constants" / leaf
+        yield mirror_root / "entity_props" / leaf
+
+    # Legacy support: keep old lookups working while migrating files.
+    yield SMART_CONTEXT_DIR / (normalized + ".md")
+
     segments = normalized.split(".")
     while segments:
-        # Map namespaces to folders: engine.TraceLine -> engine/TraceLine.md
         if len(segments) == 1:
             yield SMART_CONTEXT_DIR / (segments[0] + ".md")
         else:
@@ -485,34 +519,120 @@ def _smart_context_candidates(symbol: str):
         segments.pop()
 
 
+def _format_base_context_from_types(symbol: str):
+    """Build baseline context from generated types so smart files can stay additive."""
+    baseline = get_types(symbol)
+
+    has_core = any(
+        key in baseline for key in ("signature", "desc", "params", "returns", "constants")
+    )
+    if not has_core:
+        return None, baseline
+
+    lines = [f"## Base Type Context: {symbol}"]
+
+    signature = baseline.get("signature")
+    if signature:
+        lines.extend(["", "### Signature", signature])
+
+    desc = baseline.get("desc")
+    if desc:
+        lines.extend(["", "### Description", desc])
+
+    params = baseline.get("params") or []
+    if params:
+        lines.extend(["", "### Parameters"])
+        for entry in params:
+            lines.append(f"- {entry}")
+
+    returns = baseline.get("returns") or []
+    if returns:
+        lines.extend(["", "### Returns"])
+        for entry in returns:
+            lines.append(f"- {entry}")
+
+    required_constants = baseline.get("required_constants") or []
+    if required_constants:
+        lines.extend(["", "### Required Constants"])
+        for entry in required_constants:
+            lines.append(f"- {entry}")
+
+    constants = baseline.get("constants") or []
+    if constants:
+        lines.extend(["", "### Constants"]) 
+        limit = 40
+        for entry in constants[:limit]:
+            lines.append(f"- {entry}")
+        if len(constants) > limit:
+            lines.append(f"- ... and {len(constants) - limit} more")
+
+    return "\n".join(lines), None
+
+
+def _combine_base_and_additional(base_text: str | None, additional_text: str | None) -> str:
+    if base_text and additional_text:
+        return "\n\n".join([
+            base_text,
+            "---",
+            "## Additional Smart Context",
+            additional_text.strip(),
+        ])
+    if additional_text:
+        return additional_text
+    return base_text or ""
+
+
 def get_smart_context(symbol: str):
     if not symbol:
         raise ValueError("symbol is required")
 
+    base_text, type_suggestions = _format_base_context_from_types(symbol)
+
     for candidate in _smart_context_candidates(symbol):
         if candidate.exists():
             try:
-                content = candidate.read_text(encoding=DEFAULT_ENCODING)
+                additional = candidate.read_text(encoding=DEFAULT_ENCODING)
+                merged_content = _combine_base_and_additional(base_text, additional)
                 return {
                     "symbol": symbol,
                     "path": str(candidate),
-                    "content": content
+                    "content": merged_content,
+                    "base_context_included": bool(base_text)
                 }
             except Exception:
                 continue  # try next candidate
 
     normalized = symbol.strip().replace("::", ".").replace("/", ".")
-    partial_hits = list(SMART_CONTEXT_DIR.glob(f"*{normalized}*.md"))
+    partial_hits = list(SMART_CONTEXT_DIR.rglob(f"*{normalized}*.md"))
     if partial_hits:
         target = partial_hits[0]
         try:
+            additional = target.read_text(encoding=DEFAULT_ENCODING)
+            merged_content = _combine_base_and_additional(base_text, additional)
             return {
                 "symbol": symbol,
                 "path": str(target),
-                "content": target.read_text(encoding=DEFAULT_ENCODING)
+                "content": merged_content,
+                "base_context_included": bool(base_text)
             }
         except Exception:
             pass  # fall through to suggestions
+
+    # No additional smart markdown found: return baseline types-derived context.
+    if base_text:
+        return {
+            "symbol": symbol,
+            "path": "<types-fallback>",
+            "content": base_text,
+            "base_context_included": True
+        }
+
+    if type_suggestions and type_suggestions.get("suggestions"):
+        return {
+            "did_you_mean": type_suggestions.get("did_you_mean"),
+            "suggestions": type_suggestions.get("suggestions", []),
+            "hint": type_suggestions.get("hint") or "No matching symbol found in smart context or types."
+        }
 
     # No direct hit: try partial library search if no dots in symbol
     library_matches = []

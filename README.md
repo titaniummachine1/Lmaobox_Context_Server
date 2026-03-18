@@ -59,9 +59,16 @@ If you use the bundled executable instead of Python launcher:
 - MCP stdio entrypoint: `launch_mcp.py`
 - MCP tool protocol implementation: `src/mcp_server/mcp_stdio.py`
 - HTTP/API logic + symbol lookup: `src/mcp_server/server.py`
-- Smart context content: `data/smart_context/`
+- Smart context content: `data/smart_context/README.md`
 - Generated types used by `get_types`: `types/lmaobox_lua_api/`
 - Bundler and docs automation: `automations/`
+
+## Smart Context Rules
+
+- Layout mirrors `types/lmaobox_lua_api/` under `data/smart_context/lmaobox_lua_api/`.
+- Smart files are additive only (extra tips/examples).
+- `get_smart_context` always includes base type context from `get_types`.
+- If no additive smart file exists, `get_smart_context` falls back to type-derived context automatically.
 
 ## Available MCP Tools
 
@@ -101,7 +108,3 @@ node automations/refresh-docs.js
 
 - Architecture map: `docs/ARCHITECTURE.md`
 - Install and operations guide: `docs/INSTALL_AND_OPERATIONS.md`
-
-```
-
-```
