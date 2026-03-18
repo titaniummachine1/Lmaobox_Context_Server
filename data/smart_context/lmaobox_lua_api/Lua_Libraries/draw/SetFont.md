@@ -20,4 +20,4 @@ draw.Text(20, 20, "Title")
 
 - Call after `draw.CreateFont`
 - Must set before measuring or drawing text
-
+- Font state is **independent** from color — setting a font does not affect color, and vice versa

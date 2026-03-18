@@ -168,3 +168,8 @@ DrawProgressBar(10, 50, 200, 30, charge, "Charge: " .. math.floor(charge * 100) 
 - **Alpha channel** in Color() controls transparency
 - For just an outline, use `draw.OutlinedRect()` instead
 - **Performance**: Minimize draw calls per frame
+
+### Global Color State
+
+- draw.Color(r, g, b, a) sets a global draw color state for this frame.
+- Always set color before drawing each shape/text batch; otherwise the previous color may carry over or alpha may be 0, making output invisible.

@@ -47,5 +47,11 @@ end
 
 ### Notes
 
-- Call **after** setting font and color
+- Call **after** setting font with `draw.SetFont();` Color does not affect measurement
+- Returns (width, height) in pixels for the current font
 - Use measurements to align/box text cleanly
+
+### Global Color State
+
+- draw.Color(r, g, b, a) sets a global draw color state for this frame.
+- Always set color before drawing each shape/text batch; otherwise the previous color may carry over or alpha may be 0, making output invisible.

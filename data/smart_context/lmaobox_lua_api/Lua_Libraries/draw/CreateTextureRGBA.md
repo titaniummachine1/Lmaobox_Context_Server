@@ -26,4 +26,5 @@ end)
 
 - Useful for dynamic or generated images
 - Keep data size small; power-of-two dims avoid artifacts
-
+- `CreateTextureRGBA()` is a resource allocation function, not a drawing function
+- Color must be set before calling `draw.TexturedRect()` or `draw.TexturedPolygon()` with the result

@@ -29,4 +29,6 @@ end
 
 ### Notes
 
-- For outlines, use `draw.OutlinedCircle`
+- For outlines, use `draw.OutlinedCircle()` (which _does_ require global color state)
+- `ColoredCircle()` takes color per-call (r,g,b,a as parameters), so it does not depend on global color state
+- Unlike other draw functions, `ColoredCircle()` will render even if the global color was not set this frame

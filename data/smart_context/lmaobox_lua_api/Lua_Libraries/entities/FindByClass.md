@@ -120,5 +120,8 @@ end
 
 - Returns **empty table** if no entities found (never nil)
 - Result includes **all entities** of that class (dead, dormant, etc)
+- Entity result tables are often **non-sequential / sparse**; use `pairs(result)` when iterating entities
+- Do **not** use `ipairs(result)` on `entities.FindByClass()` results unless you have explicitly re-packed the list into a sequential array, or you may silently miss entities/players
+- `ipairs` is still fine for your own hand-built sequential arrays like `classes = { ... }`
 - **Filter results** based on your needs (alive, team, distance)
 - More specific class names are faster than generic ones

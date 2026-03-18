@@ -22,5 +22,6 @@ end)
 
 ### Notes
 
-- Store the TextureID and reuse; delete on unload with draw.DeleteTexture
-
+- Store the TextureID and reuse; delete on unload with `draw.DeleteTexture()`
+- `CreateTexture()` is a resource allocation function, not a drawing function
+- Color must be set before calling `draw.TexturedRect()` or `draw.TexturedPolygon()` with the result

@@ -116,3 +116,10 @@ end
 - `draw.SetFont` - Set active font
 - `draw.Color` - Set text color
 - `draw.GetTextSize` - Calculate text dimensions
+
+### Global Color State
+
+- `draw.Color(r, g, b, a)` sets a global draw color state for this frame
+- **Both font and color must be set** before drawing text
+- If color is not set, the previous frame's color may carry over or alpha may be 0 (making text invisible)
+- Set color fresh for each text batch: `draw.Color(255, 255, 255, 255)` before `draw.Text()`

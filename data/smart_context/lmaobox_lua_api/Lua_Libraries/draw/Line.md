@@ -49,7 +49,17 @@ local function DrawBox(x1, y1, x2, y2)
 end
 ```
 
+### Global Color State
+
+- `draw.Color(r, g, b, a)` sets a global draw color state for this frame
+- Always set color before drawing; otherwise the previous color may carry over or alpha may be 0, making output invisible
+
 ### Notes
 
 - Lines are 1-pixel thick; for thicker lines, draw multiple offset lines
 - Always set draw.Color before drawing
+
+### Global Color State
+
+- draw.Color(r, g, b, a) sets a global draw color state for this frame.
+- Always set color before drawing each shape/text batch; otherwise the previous color may carry over or alpha may be 0, making output invisible.
