@@ -1,9 +1,11 @@
 {
+  "_comment": "TEMPLATE - Use scripts/setup-mcp-config.ps1 to generate the correct config for your system",
   "mcpServers": {
     "lmaobox-context": {
+      "type": "stdio",
       "command": "python",
-      "args": ["C:/path/to/Lmaobox_Context_Server/launch_mcp.py"],
-      "cwd": "C:/path/to/Lmaobox_Context_Server"
+      "args": ["REPLACE_WITH_REPO_ROOT/launch_mcp.py"],
+      "cwd": "REPLACE_WITH_REPO_ROOT"
     }
   }
 }

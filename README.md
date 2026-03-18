@@ -23,11 +23,30 @@ What install does:
 3. Pulls the upstream docs repository (`https://github.com/lbox-src/docs`) into `data/upstream_docs/lbox-src-docs/`.
 4. Leaves website crawl refresh optional (`-RunWebRefresh`) so startup stays fast.
 
-## MCP Config (VS Code / Cursor / Claude)
+## MCP Setup (VS Code / Cursor / Claude)
+
+**Easy setup for AI or manual install:**
+
+```powershell
+# Auto-generate and display the config (copy & paste into settings)
+.\scripts\setup-mcp-config.ps1
+
+# OR: Auto-install directly into VS Code
+.\scripts\setup-mcp-config.ps1 -EditorConfigPath "$env:APPDATA\Code\User\settings.json"
+
+# OR: Auto-install directly into Cursor
+.\scripts\setup-mcp-config.ps1 -EditorConfigPath "$env:APPDATA\Cursor\User\settings.json"
+```
+
+**After running one of the above:**
+1. Restart your editor (VS Code / Cursor)
+2. You should see "lmaobox-context" MCP server in the status bar at the bottom
+
+**Manual config (if preferred):** Add this to your editor's `settings.json` under `"modelContextProtocol.servers"`:
 
 ```json
 {
-  "servers": {
+  "modelContextProtocol.servers": {
     "lmaobox-context": {
       "type": "stdio",
       "command": "python",
@@ -39,11 +58,11 @@ What install does:
 }
 ```
 
-If you use the bundled executable instead of Python launcher:
+**If using the pre-built executable instead of Python:**
 
 ```json
 {
-  "servers": {
+  "modelContextProtocol.servers": {
     "lmaobox-context": {
       "type": "stdio",
       "command": "C:/path/to/Lmaobox_Context_Server/lmaobox-context-server.exe",
