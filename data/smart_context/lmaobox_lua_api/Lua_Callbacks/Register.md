@@ -57,5 +57,7 @@ end)
 ### Notes
 
 - Use a unique identifier string per registration to prevent duplicates
-- To remove a callback, re-register with same id and `nil`? (depends on environment)
+- Always call `callbacks.Unregister(eventName, identifier)` before registering the same id again
+- Registering the same callback id twice throws instead of replacing the old callback
+- Do not register, unregister, or invoke callbacks from inside other callbacks; this is crash-prone in practice
 - Keep callbacks lightweight; heavy work should be cached

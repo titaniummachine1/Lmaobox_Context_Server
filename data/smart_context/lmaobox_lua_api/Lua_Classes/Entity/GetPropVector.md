@@ -121,3 +121,5 @@ end
 - Returns **Vector3(0, 0, 0)** if prop not found
 - **localdata** table is most common for player props
 - Use `Entity:GetAbsOrigin()` instead of prop for position (faster)
+- On dormant players, vector props can still exist but may be stale or partially updated
+- Do not trust dormant-player velocity, view offset, or other prop vectors for gameplay logic unless you intentionally want last-known data

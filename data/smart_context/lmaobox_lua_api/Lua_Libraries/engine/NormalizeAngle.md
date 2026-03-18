@@ -62,5 +62,7 @@ end
 ## Note
 
 - Only normalizes **yaw** (Y-axis / horizontal)
+- Angle math in Lmaobox scripts is conventionally in **degrees**, not radians
 - Pitch (X) and Roll (Z) rarely need wrapping in gameplay
+- Legit player pitch is typically clamped near `[-89, 89]`, while resolver or exploit code may observe wider values
 - Used in anti-aim detection, angle prediction, and resolver logic

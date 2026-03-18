@@ -4,7 +4,10 @@
 
 ### Required Context
 
-- MASK_SHOT_HULL (TraceLine masks; see constants/E_TraceLine.d.lua)
+- Common defaults:
+  - `MASK_SHOT_HULL` for visibility and hitscan checks
+  - `MASK_SOLID_BRUSHONLY` for world-only or splash-surface checks
+  - `MASK_PLAYERSOLID` for movement or projectile simulation traces
 - Params:
   - src: Vector3
   - dst: Vector3
@@ -43,6 +46,15 @@ end)
 
 if trace.entity then
     print("Hit enemy:", trace.entity:GetClass())
+end
+```
+
+#### World-only surface check
+
+```lua
+local trace = engine.TraceLine(eye, destination, MASK_SOLID_BRUSHONLY)
+if trace.fraction < 1.0 then
+    print("World geometry blocks this line")
 end
 ```
 
@@ -101,3 +113,10 @@ end
 -- trace.allsolid  -- True if trace is entirely in solid
 -- trace.startsolid -- True if trace started in solid
 ```
+
+### Notes
+
+- Choose the mask based on intent instead of reusing one mask everywhere
+- `MASK_SHOT_HULL` is the common default for visibility and aim checks
+- `MASK_SOLID_BRUSHONLY` is useful when you only care about world brushes and surfaces
+- `MASK_PLAYERSOLID` is the common choice for movement, hull stepping, and projectile/path simulation

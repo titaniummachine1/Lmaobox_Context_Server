@@ -54,7 +54,7 @@ local Hitbox = {
 
 local Menu = { -- this is the config that will be loaded every time u load the script
 
-    tabs = { -- dont touch this, this is just for managing the tabs in the menu
+    tabs = {   -- dont touch this, this is just for managing the tabs in the menu
         Main = true,
         Advanced = false,
         Visuals = false,
@@ -96,7 +96,7 @@ local Menu = { -- this is the config that will be loaded every time u load the s
     Visuals = {
         Active = true,
         VisualizePath = true,
-        Path_styles = {"Line", "Alt Line", "Dashed"},
+        Path_styles = { "Line", "Alt Line", "Dashed" },
         Path_styles_selected = 1,
         VisualizeHitchance = false,
         VisualizeProjectile = false,
@@ -105,61 +105,61 @@ local Menu = { -- this is the config that will be loaded every time u load the s
         NccPred = false
     },
 }
-    -- Contains pairs of keys and their names
-    ---@type table<integer, string>
-    local KeyNames = {
-        [KEY_SEMICOLON] = "SEMICOLON",
-        [KEY_APOSTROPHE] = "APOSTROPHE",
-        [KEY_BACKQUOTE] = "BACKQUOTE",
-        [KEY_COMMA] = "COMMA",
-        [KEY_PERIOD] = "PERIOD",
-        [KEY_SLASH] = "SLASH",
-        [KEY_BACKSLASH] = "BACKSLASH",
-        [KEY_MINUS] = "MINUS",
-        [KEY_EQUAL] = "EQUAL",
-        [KEY_ENTER] = "ENTER",
-        [KEY_SPACE] = "SPACE",
-        [KEY_BACKSPACE] = "BACKSPACE",
-        [KEY_TAB] = "TAB",
-        [KEY_CAPSLOCK] = "CAPSLOCK",
-        [KEY_NUMLOCK] = "NUMLOCK",
-        [KEY_ESCAPE] = "ESCAPE",
-        [KEY_SCROLLLOCK] = "SCROLLLOCK",
-        [KEY_INSERT] = "INSERT",
-        [KEY_DELETE] = "DELETE",
-        [KEY_HOME] = "HOME",
-        [KEY_END] = "END",
-        [KEY_PAGEUP] = "PAGEUP",
-        [KEY_PAGEDOWN] = "PAGEDOWN",
-        [KEY_BREAK] = "BREAK",
-        [KEY_LSHIFT] = "LSHIFT",
-        [KEY_RSHIFT] = "RSHIFT",
-        [KEY_LALT] = "LALT",
-        [KEY_RALT] = "RALT",
-        [KEY_LCONTROL] = "LCONTROL",
-        [KEY_RCONTROL] = "RCONTROL",
-        [KEY_UP] = "UP",
-        [KEY_LEFT] = "LEFT",
-        [KEY_DOWN] = "DOWN",
-        [KEY_RIGHT] = "RIGHT",
-    }
+-- Contains pairs of keys and their names
+---@type table<integer, string>
+local KeyNames = {
+    [KEY_SEMICOLON] = "SEMICOLON",
+    [KEY_APOSTROPHE] = "APOSTROPHE",
+    [KEY_BACKQUOTE] = "BACKQUOTE",
+    [KEY_COMMA] = "COMMA",
+    [KEY_PERIOD] = "PERIOD",
+    [KEY_SLASH] = "SLASH",
+    [KEY_BACKSLASH] = "BACKSLASH",
+    [KEY_MINUS] = "MINUS",
+    [KEY_EQUAL] = "EQUAL",
+    [KEY_ENTER] = "ENTER",
+    [KEY_SPACE] = "SPACE",
+    [KEY_BACKSPACE] = "BACKSPACE",
+    [KEY_TAB] = "TAB",
+    [KEY_CAPSLOCK] = "CAPSLOCK",
+    [KEY_NUMLOCK] = "NUMLOCK",
+    [KEY_ESCAPE] = "ESCAPE",
+    [KEY_SCROLLLOCK] = "SCROLLLOCK",
+    [KEY_INSERT] = "INSERT",
+    [KEY_DELETE] = "DELETE",
+    [KEY_HOME] = "HOME",
+    [KEY_END] = "END",
+    [KEY_PAGEUP] = "PAGEUP",
+    [KEY_PAGEDOWN] = "PAGEDOWN",
+    [KEY_BREAK] = "BREAK",
+    [KEY_LSHIFT] = "LSHIFT",
+    [KEY_RSHIFT] = "RSHIFT",
+    [KEY_LALT] = "LALT",
+    [KEY_RALT] = "RALT",
+    [KEY_LCONTROL] = "LCONTROL",
+    [KEY_RCONTROL] = "RCONTROL",
+    [KEY_UP] = "UP",
+    [KEY_LEFT] = "LEFT",
+    [KEY_DOWN] = "DOWN",
+    [KEY_RIGHT] = "RIGHT",
+}
 
-    -- Contains pairs of keys and their values
-    ---@type table<integer, string>
-    local KeyValues = {
-        [KEY_LBRACKET] = "[",
-        [KEY_RBRACKET] = "]",
-        [KEY_SEMICOLON] = ";",
-        [KEY_APOSTROPHE] = "'",
-        [KEY_BACKQUOTE] = "`",
-        [KEY_COMMA] = ",",
-        [KEY_PERIOD] = ".",
-        [KEY_SLASH] = "/",
-        [KEY_BACKSLASH] = "\\",
-        [KEY_MINUS] = "-",
-        [KEY_EQUAL] = "=",
-        [KEY_SPACE] = " ",
-    }
+-- Contains pairs of keys and their values
+---@type table<integer, string>
+local KeyValues = {
+    [KEY_LBRACKET] = "[",
+    [KEY_RBRACKET] = "]",
+    [KEY_SEMICOLON] = ";",
+    [KEY_APOSTROPHE] = "'",
+    [KEY_BACKQUOTE] = "`",
+    [KEY_COMMA] = ",",
+    [KEY_PERIOD] = ".",
+    [KEY_SLASH] = "/",
+    [KEY_BACKSLASH] = "\\",
+    [KEY_MINUS] = "-",
+    [KEY_EQUAL] = "=",
+    [KEY_SPACE] = " ",
+}
 
 local Lua__fullPath = GetScriptName()
 local Lua__fileName = Lua__fullPath:match("\\([^\\]-)$"):gsub("%.lua$", "")
@@ -168,7 +168,7 @@ local function CreateCFG(folder_name, table)
     local success, fullPath = filesystem.CreateDirectory(folder_name)
     local filepath = tostring(fullPath .. "/config.cfg")
     local file = io.open(filepath, "w")
-    
+
     if file then
         local function serializeTable(tbl, level)
             level = level or 0
@@ -195,7 +195,7 @@ local function CreateCFG(folder_name, table)
         local serializedConfig = serializeTable(table)
         file:write(serializedConfig)
         file:close()
-        printc( 255, 183, 0, 255, "["..os.date("%H:%M:%S").."] Saved Config to ".. tostring(fullPath))
+        printc(255, 183, 0, 255, "[" .. os.date("%H:%M:%S") .. "] Saved Config to " .. tostring(fullPath))
     end
 end
 
@@ -209,7 +209,7 @@ local function LoadCFG(folder_name)
         file:close()
         local chunk, err = load("return " .. content)
         if chunk then
-            printc( 0, 255, 140, 255, "["..os.date("%H:%M:%S").."] Loaded Config from ".. tostring(fullPath))
+            printc(0, 255, 140, 255, "[" .. os.date("%H:%M:%S") .. "] Loaded Config from " .. tostring(fullPath))
             return chunk()
         else
             CreateCFG(string.format([[Lua %s]], Lua__fileName), Menu) --saving the config
@@ -218,8 +218,8 @@ local function LoadCFG(folder_name)
     end
 end
 
-local status, loadedMenu = pcall(function() 
-    return assert(LoadCFG(string.format([[Lua %s]], Lua__fileName))) 
+local status, loadedMenu = pcall(function()
+    return assert(LoadCFG(string.format([[Lua %s]], Lua__fileName)))
 end) -- Auto-load config
 
 -- Function to check if all expected functions exist in the loaded config
@@ -263,96 +263,100 @@ local priorPrediction = {}
 local hitChanceRecords = {}
 local vPath = {}
 local vHitbox = { Vector3(-22, -22, 0), Vector3(22, 22, 80) }
-local MAX_ANGLE_HISTORY = Menu.Advanced.StrafeSamples  -- Number of past angles to consider for averaging
-local MAX_CENTER_HISTORY = 5 -- Maximum number of center samples to consider for smoothing
+local MAX_ANGLE_HISTORY = Menu.Advanced.StrafeSamples -- Number of past angles to consider for averaging
+local MAX_CENTER_HISTORY = 5                          -- Maximum number of center samples to consider for smoothing
 
-local strafeAngleHistories = {} -- History of strafe angles for each player
-local centerHistories = {} -- History of center directions for each player
+local strafeAngleHistories = {}                       -- History of strafe angles for each player
+local centerHistories = {}                            -- History of center directions for each player
 
 --[[
         Input Utils
     ]]
 
-    ---@class Input
-    local Input = {}
+---@class Input
+local Input = {}
 
-    -- Fill the tables
-    local function D(x) return x, x end
-    for i = 1, 10 do KeyNames[i], KeyValues[i] = D(tostring(i - 1)) end -- 0 - 9
-    for i = 11, 36 do KeyNames[i], KeyValues[i] = D(string.char(i + 54)) end -- A - Z
-    for i = 37, 46 do KeyNames[i], KeyValues[i] = "KP_" .. (i - 37), tostring(i - 37) end -- KP_0 - KP_9
-    for i = 92, 103 do KeyNames[i] = "F" .. (i - 91) end
-    for i = 1, 10 do local mouseButtonName = "MOUSE_" .. i KeyNames[MOUSE_FIRST + i - 1] = mouseButtonName KeyValues[MOUSE_FIRST + i - 1] = "Mouse Button " .. i end
+-- Fill the tables
+local function D(x) return x, x end
+for i = 1, 10 do KeyNames[i], KeyValues[i] = D(tostring(i - 1)) end                       -- 0 - 9
+for i = 11, 36 do KeyNames[i], KeyValues[i] = D(string.char(i + 54)) end                  -- A - Z
+for i = 37, 46 do KeyNames[i], KeyValues[i] = "KP_" .. (i - 37), tostring(i - 37) end     -- KP_0 - KP_9
+for i = 92, 103 do KeyNames[i] = "F" .. (i - 91) end
+for i = 1, 10 do
+    local mouseButtonName = "MOUSE_" .. i
+    KeyNames[MOUSE_FIRST + i - 1] = mouseButtonName
+    KeyValues[MOUSE_FIRST + i - 1] = "Mouse Button " .. i
+end
 
-    -- Returns the name of a keycode
-    ---@param key integer
-    ---@return string|nil
-    local function GetKeyName(key)
-        return KeyNames[key]
+-- Returns the name of a keycode
+---@param key integer
+---@return string|nil
+local function GetKeyName(key)
+    return KeyNames[key]
+end
+
+-- Returns the string value of a keycode
+---@param key integer
+---@return string|nil
+local function KeyToChar(key)
+    return KeyValues[key]
+end
+
+-- Returns the keycode of a string value
+---@param char string
+---@return integer|nil
+local function CharToKey(char)
+    return table.find(KeyValues, string.upper(char))
+end
+
+-- Update the GetPressedKey function to check for these additional mouse buttons
+local function GetPressedKey()
+    for i = KEY_FIRST, KEY_LAST do
+        if input.IsButtonDown(i) then return i end
     end
 
-    -- Returns the string value of a keycode
-    ---@param key integer
-    ---@return string|nil
-    local function KeyToChar(key)
-        return KeyValues[key]
+    -- Check for standard mouse buttons
+    if input.IsButtonDown(MOUSE_LEFT) then return MOUSE_LEFT end
+    if input.IsButtonDown(MOUSE_RIGHT) then return MOUSE_RIGHT end
+    if input.IsButtonDown(MOUSE_MIDDLE) then return MOUSE_MIDDLE end
+
+    -- Check for additional mouse buttons
+    for i = 1, 10 do
+        if input.IsButtonDown(MOUSE_FIRST + i - 1) then return MOUSE_FIRST + i - 1 end
     end
 
-    -- Returns the keycode of a string value
-    ---@param char string
-    ---@return integer|nil
-    local function CharToKey(char)
-        return table.find(KeyValues, string.upper(char))
+    return nil
+end
+
+-- Returns all currently pressed keys as a table
+---@return integer[]
+local function GetPressedKeys()
+    local keys = {}
+    for i = KEY_FIRST, KEY_LAST do
+        if input.IsButtonDown(i) then table.insert(keys, i) end
     end
 
-    -- Update the GetPressedKey function to check for these additional mouse buttons
-    local function GetPressedKey()
-        for i = KEY_FIRST, KEY_LAST do
-            if input.IsButtonDown(i) then return i end
-        end
+    return keys
+end
 
-        -- Check for standard mouse buttons
-        if input.IsButtonDown(MOUSE_LEFT) then return MOUSE_LEFT end
-        if input.IsButtonDown(MOUSE_RIGHT) then return MOUSE_RIGHT end
-        if input.IsButtonDown(MOUSE_MIDDLE) then return MOUSE_MIDDLE end
+function Normalize(vec)
+    local length = math.sqrt(vec.x * vec.x + vec.y * vec.y + vec.z * vec.z)
+    return Vector3(vec.x / length, vec.y / length, vec.z / length)
+end
 
-        -- Check for additional mouse buttons
-        for i = 1, 10 do
-            if input.IsButtonDown(MOUSE_FIRST + i - 1) then return MOUSE_FIRST + i - 1 end
-        end
+-- Define a table for centralized storage
+local dataStorage = {}
 
-        return nil
+-- Function to set or get values from the storage
+function DataStorage(key, value)
+    -- If a value is provided, set it
+    if value ~= nil then
+        dataStorage[key] = value
+    else
+        -- If no value is provided, return the stored value
+        return dataStorage[key]
     end
-
-    -- Returns all currently pressed keys as a table
-    ---@return integer[]
-    local function GetPressedKeys()
-        local keys = {}
-        for i = KEY_FIRST, KEY_LAST do
-            if input.IsButtonDown(i) then table.insert(keys, i) end
-        end
-
-        return keys
-    end
-
-    function Normalize(vec)
-        local length = math.sqrt(vec.x * vec.x + vec.y * vec.y + vec.z * vec.z)
-        return Vector3(vec.x / length, vec.y / length, vec.z / length)
-    end
-
-    -- Define a table for centralized storage
-    local dataStorage = {}
-
-    -- Function to set or get values from the storage
-    function DataStorage(key, value)
-        -- If a value is provided, set it
-        if value ~= nil then
-            dataStorage[key] = value
-        else
-            -- If no value is provided, return the stored value
-            return dataStorage[key]
-        end
-    end
+end
 
 ---@param me WPlayer
 local function CalcStrafe(me)
@@ -382,7 +386,7 @@ local function CalcStrafe(me)
 
             -- Calculate the center direction based on recent strafe angles
             if #strafeAngleHistories[idx] >= 3 then
-                local center = angle.y  -- Use the most recent angle as the center
+                local center = angle.y -- Use the most recent angle as the center
                 table.insert(centerHistories[idx], center)
 
                 if #centerHistories[idx] > MAX_CENTER_HISTORY then
@@ -408,7 +412,7 @@ end
     if m_flChargeBeginTime ~= 0 then
         m_flChargeBeginTime = globals.CurTime() - m_flChargeBeginTime
     end
-    
+
     local vecOffset, vecMaxs, velForward
 
     if case == -1 then  -- RocketLauncher, DragonsFury, Pomson, Bison
@@ -452,9 +456,9 @@ end
 end]]
 
 local M_RADPI = 180 / math.pi
-local DefaultHitbox = { Vector3(-0.2, -0.2, -0.2), Vector3(0.2, 0.2, 0.2)}
+local DefaultHitbox = { Vector3(-0.2, -0.2, -0.2), Vector3(0.2, 0.2, 0.2) }
 -- Preliminary large hull check
-local largeHitbox = { Vector3(-4, -4, -4), Vector3(4, 4, 4), Vector3(4, 4, 50)  }
+local largeHitbox = { Vector3(-4, -4, -4), Vector3(4, 4, 4), Vector3(4, 4, 50) }
 
 -- Cache API calls for optimization
 local atan = math.atan
@@ -485,10 +489,10 @@ local function RotateVector(vector, angle)
 end
 
 -- Define the necessary variables
-local vUp = Vector3(0, 0, 1)  -- Replace with the actual up vector
+local vUp = Vector3(0, 0, 1)           -- Replace with the actual up vector
 local GROUND_COLLISION_ANGLE_LOW = 45  -- Replace with the actual value
-local GROUND_COLLISION_ANGLE_HIGH = 60  -- Replace with the actual value
-local FORWARD_COLLISION_ANGLE = 55 
+local GROUND_COLLISION_ANGLE_HIGH = 60 -- Replace with the actual value
+local FORWARD_COLLISION_ANGLE = 55
 
 local projectileSimulation = {}
 local projectileSimulation2 = EMPTY_VECTOR
@@ -527,10 +531,10 @@ end
 function GetProjectileFireSetup(player, vecOffset, isAlternative)
     -- Get eye position of the player
     local eyePos = player:GetAbsOrigin() + player:GetPropVector("localdata", "m_vecViewOffset[0]")
-    
+
     -- Get the forward, right, and up vectors based on view angles
     local forward, right, up = engine.GetViewAngles():Forward(), engine.GetViewAngles():Right(), engine.GetViewAngles():Up()
-    
+
     -- Apply ducking offset if player is ducking
     if player:GetPropInt("m_fFlags") & FL_DUCKING then
         vecOffset = vecOffset * 0.75
@@ -541,7 +545,7 @@ function GetProjectileFireSetup(player, vecOffset, isAlternative)
     if isAlternative then
         isRight = not isRight
     end
-    
+
     -- Flip the y-coordinate offset if the weapon is on the left side
     if not isRight then
         vecOffset.y = -vecOffset.y
@@ -565,14 +569,15 @@ local function calculateHitChancePercentage(lastPredictedPos, currentPos)
     end
 
     -- Calculate horizontal distance (2D distance on the X-Y plane)
-    local horizontalDistance = math.sqrt((currentPos.x - lastPredictedPos.x)^2 + (currentPos.y - lastPredictedPos.y)^2)
+    local horizontalDistance = math.sqrt((currentPos.x - lastPredictedPos.x) ^ 2 + (currentPos.y - lastPredictedPos.y) ^
+    2)
 
     -- Calculate vertical distance with an allowance for vertical movement
     local verticalDistance = math.abs(currentPos.z - lastPredictedPos.z)
 
     -- Define maximum acceptable distances
-    local maxHorizontalDistance = 12  -- Max acceptable horizontal distance in units
-    local maxVerticalDistance = 45    -- Max acceptable vertical distance in units
+    local maxHorizontalDistance = 12 -- Max acceptable horizontal distance in units
+    local maxVerticalDistance = 45   -- Max acceptable vertical distance in units
 
     -- Normalize the distances to a 0-1 scale
     local horizontalFactor = math.min(horizontalDistance / maxHorizontalDistance, 1)
@@ -616,7 +621,7 @@ local function checkPathClearance(dest, direction, angle, distance, origin, targ
         return false
     end
 
-    return true, traceDown.endpos  -- Path is clear and within range
+    return true, traceDown.endpos -- Path is clear and within range
 end
 
 -- Function to find the best shooting position
@@ -626,14 +631,16 @@ local function FindBestShootingPosition(origin, dest, target, BlastRadius)
         local point = dest + RotateVector(direction, angle) * distance
 
         -- Perform a trace line from origin to the point
-        local traceLineOriginToPoint = engine.TraceLine(origin, point, 100679691, function(entity) return entity:GetIndex() ~= target:GetIndex() end)
+        local traceLineOriginToPoint = engine.TraceLine(origin, point, 100679691,
+            function(entity) return entity:GetIndex() ~= target:GetIndex() end)
 
         -- Return whether the path is clear and the actual end position
         return traceLineOriginToPoint.fraction > 0.9, traceLineOriginToPoint.endpos
     end
 
     -- Perform an initial trace from origin to destination
-    local initialTrace = engine.TraceLine(origin, dest, 100679691, function(entity) return entity:GetIndex() ~= target:GetIndex() end)
+    local initialTrace = engine.TraceLine(origin, dest, 100679691,
+        function(entity) return entity:GetIndex() ~= target:GetIndex() end)
 
     -- If the initial trace hits something other than the target, find a better shooting position
     if initialTrace.fraction < 1 and initialTrace.entity:GetIndex() ~= target:GetIndex() then
@@ -672,7 +679,7 @@ local function FindBestShootingPosition(origin, dest, target, BlastRadius)
             local minDistance = 0
             local maxDistance = (maxDistancePoint - dest):Length()
             local iterations = Menu.Advanced.SplashAccuracy or 5
-            local bestPoint = maxDistancePoint  -- Start with the farthest point
+            local bestPoint = maxDistancePoint -- Start with the farthest point
             local bestDistance = maxDistance
 
             for i = 1, iterations do
@@ -697,15 +704,15 @@ local function FindBestShootingPosition(origin, dest, target, BlastRadius)
             end
         end
 
-        return false  -- No valid shooting position found
+        return false -- No valid shooting position found
     end
 
-    return dest  -- If the initial trace is clear, return the destination as the best shooting position
+    return dest -- If the initial trace is clear, return the destination as the best shooting position
 end
 
 -- Precompute and cache frequently used constants and empty vectors
-local MASK_PLAYERSOLID = 100679691  -- Example value; replace with the actual value from your environment for tracing
-local FULL_HIT_FRACTION = 1.0  -- Represents a full hit fraction in trace results
+local MASK_PLAYERSOLID = 100679691 -- Example value; replace with the actual value from your environment for tracing
+local FULL_HIT_FRACTION = 1.0      -- Represents a full hit fraction in trace results
 local DRAG_COEFFICIENT = 0.029374  -- Combined drag coefficients for drag simulation
 
 -- Function to solve projectile trajectory and return the necessary angles and time to hit a target
@@ -741,7 +748,7 @@ local function SolveProjectile(origin, dest, speed, gravity, sv_gravity, target,
         -- Calculate the time to hit based on speed and distance
         local time_to_target = direction:Length() / speed
         if time_to_target > timeToHit then
-            return false  -- Projectile will fly out of range, so return false
+            return false -- Projectile will fly out of range, so return false
         end
 
         -- Perform a trace line to check if the path is clear
@@ -750,14 +757,14 @@ local function SolveProjectile(origin, dest, speed, gravity, sv_gravity, target,
             return false -- Path is obstructed, so return false
         end
 
-        projectileSimulation = {origin, trace.endpos}
+        projectileSimulation = { origin, trace.endpos }
 
         -- Return the result with no gravity calculations
         return {
             angles = Math.PositionAngles(origin, dest),
             time = time_to_target,
             Prediction = dest,
-            Positions = {origin, dest}
+            Positions = { origin, dest }
         }
     else
         -- Ballistic arc calculation when gravity is present
@@ -766,8 +773,9 @@ local function SolveProjectile(origin, dest, speed, gravity, sv_gravity, target,
         local gravity_horizontal_squared = effective_gravity * horizontal_distance * horizontal_distance
 
         -- Solve the quadratic equation for projectile motion
-        local discriminant = speed_squared * speed_squared - effective_gravity * (gravity_horizontal_squared + 2 * vertical_distance * speed_squared)
-        if discriminant < 0 then return nil end  -- No real solution, so return nil
+        local discriminant = speed_squared * speed_squared -
+        effective_gravity * (gravity_horizontal_squared + 2 * vertical_distance * speed_squared)
+        if discriminant < 0 then return nil end -- No real solution, so return nil
 
         -- Calculate the pitch and yaw angles required for the projectile to reach the target
         local sqrt_discriminant = math.sqrt(discriminant)
@@ -783,7 +791,7 @@ local function SolveProjectile(origin, dest, speed, gravity, sv_gravity, target,
         local time_to_target = horizontal_distance / (math.cos(pitch_angle) * speed)
 
         if time_to_target > timeToHit then
-            return false  -- Projectile will fly out of range, so return false
+            return false -- Projectile will fly out of range, so return false
         end
 
         -- Define the number of segments to divide the trajectory into for simulation (default is 2)
@@ -793,7 +801,7 @@ local function SolveProjectile(origin, dest, speed, gravity, sv_gravity, target,
         local current_velocity = speed
 
         -- Table to store positions along the projectile's path
-        projectileSimulation = {current_position}
+        projectileSimulation = { current_position }
 
         -- Simulate the projectile's flight path
         for segment = 1, number_of_segments do
@@ -804,8 +812,11 @@ local function SolveProjectile(origin, dest, speed, gravity, sv_gravity, target,
 
             -- Calculate the new position based on current velocity, pitch, yaw, and gravity
             local horizontal_displacement = current_velocity * math.cos(pitch_angle) * time_segment
-            local vertical_displacement = current_velocity * math.sin(pitch_angle) * time_segment - 0.5 * effective_gravity * time_segment * time_segment
-            local new_position = origin + Vector3(horizontal_displacement * math.cos(yaw_angle), horizontal_displacement * math.sin(yaw_angle), vertical_displacement)
+            local vertical_displacement = current_velocity * math.sin(pitch_angle) * time_segment -
+            0.5 * effective_gravity * time_segment * time_segment
+            local new_position = origin +
+            Vector3(horizontal_displacement * math.cos(yaw_angle), horizontal_displacement * math.sin(yaw_angle),
+                vertical_displacement)
 
             -- Perform a trace to check for collisions
             local trace = engine.TraceLine(current_position, new_position, MASK_PLAYERSOLID, shouldHitEntity)
@@ -815,7 +826,7 @@ local function SolveProjectile(origin, dest, speed, gravity, sv_gravity, target,
 
             -- Check if the projectile collided with something that isn't the target
             if trace.fraction < FULL_HIT_FRACTION and trace.entity ~= target then
-                return false  -- Collision detected, exit the loop
+                return false -- Collision detected, exit the loop
             end
 
             -- Update the current position for the next segment
@@ -883,7 +894,8 @@ local function CheckProjectileTarget(me, weapon, player)
     local vStep = Vector3(0, 0, stepSize / 2)
     vPath = {}
     local lastP, lastV, lastG = player:GetAbsOrigin(), player:EstimateAbsVelocity(), IsOnGround(player)
-    local shouldHitEntity = shouldHitEntity or function(entity) return entity:GetIndex() ~= player:GetIndex() or entity:GetTeamNumber() ~= player:GetTeamNumber() end -- trace ignore simulated player
+    local shouldHitEntity = shouldHitEntity or
+    function(entity) return entity:GetIndex() ~= player:GetIndex() or entity:GetTeamNumber() ~= player:GetTeamNumber() end                                            -- trace ignore simulated player
     local BlastRadius = 150
 
     -- Check initial conditions
@@ -920,14 +932,16 @@ local function CheckProjectileTarget(me, weapon, player)
         end
 
         -- Forward Collision
-        local wallTrace = engine.TraceHull(lastP + vStep, pos + vStep, vHitbox[1], vHitbox[2], MASK_PLAYERSOLID, shouldHitEntity)
+        local wallTrace = engine.TraceHull(lastP + vStep, pos + vStep, vHitbox[1], vHitbox[2], MASK_PLAYERSOLID,
+            shouldHitEntity)
         if wallTrace.fraction < 1 then
             pos.x, pos.y = handleForwardCollision(vel, wallTrace)
         end
 
         -- Ground Collision
         local downStep = onGround and vStep or Vector3()
-        local groundTrace = engine.TraceHull(pos + vStep, pos - downStep, vHitbox[1], vHitbox[2], MASK_PLAYERSOLID, shouldHitEntity)
+        local groundTrace = engine.TraceHull(pos + vStep, pos - downStep, vHitbox[1], vHitbox[2], MASK_PLAYERSOLID,
+            shouldHitEntity)
         if groundTrace.fraction < 1 then
             pos, onGround = handleGroundCollision(vel, groundTrace)
         else
@@ -947,7 +961,7 @@ local function CheckProjectileTarget(me, weapon, player)
 
         -- Hitchance check and synchronization of predictions
         if i <= PredTicks then
-            local currentTick = PredTicks - i  -- Determine which tick in the future we're currently predicting
+            local currentTick = PredTicks - i -- Determine which tick in the future we're currently predicting
 
             -- Store the last prediction of the current tick
             lastPosition[player:GetIndex()][currentTick] = priorPrediction[player:GetIndex()][currentTick] or pos
@@ -956,7 +970,8 @@ local function CheckProjectileTarget(me, weapon, player)
             priorPrediction[player:GetIndex()][currentTick] = pos
 
             -- Calculate hit chance for the current tick
-            local hitChance1 = calculateHitChancePercentage(lastPosition[player:GetIndex()][currentTick], priorPrediction[player:GetIndex()][currentTick])
+            local hitChance1 = calculateHitChancePercentage(lastPosition[player:GetIndex()][currentTick],
+                priorPrediction[player:GetIndex()][currentTick])
 
             -- Insert the hit chance record
             table.insert(hitChanceRecords[player:GetIndex()], hitChance1)
@@ -973,14 +988,16 @@ local function CheckProjectileTarget(me, weapon, player)
         end
 
         -- Solve the projectile based on the current position
-        local solution = SolveProjectile(shootPos, pos, projInfo[1], projInfo[2], gravity, player, PredTicks * tick_interval)
+        local solution = SolveProjectile(shootPos, pos, projInfo[1], projInfo[2], gravity, player,
+            PredTicks * tick_interval)
         if solution == nil then goto continue end
 
         if not solution then
             if Menu.Advanced.SplashPrediction and projInfo[2] == 0 then
                 local bestPos = FindBestShootingPosition(shootPos, pos, player, BlastRadius, shouldHitEntity)
                 if bestPos then
-                    solution = SolveProjectile(shootPos, bestPos, projInfo[1], projInfo[2], gravity, player, PredTicks * tick_interval)
+                    solution = SolveProjectile(shootPos, bestPos, projInfo[1], projInfo[2], gravity, player,
+                        PredTicks * tick_interval)
                 end
             else
                 return nil
@@ -1011,7 +1028,7 @@ local function CheckProjectileTarget(me, weapon, player)
 
     -- Calculate trust factor based on the number of records
     local numRecords = #hitChanceRecords[player:GetIndex()]
-    local growthRate = Menu.Advanced.AccuracyWeight or 5  -- Customize as needed
+    local growthRate = Menu.Advanced.AccuracyWeight or 5 -- Customize as needed
     local trustFactor = calculateTrustFactor(numRecords, Menu.Advanced.Hitchance_Accuracy, growthRate)
 
     -- Adjust the average hit chance based on trust factor
@@ -1019,7 +1036,7 @@ local function CheckProjectileTarget(me, weapon, player)
 
     -- Check if the average adjusted hit chance meets the minimum required threshold
     if hitChance < Menu.Main.MinHitchance then
-        return nil  -- If not, return nil to indicate that the prediction is not reliable
+        return nil -- If not, return nil to indicate that the prediction is not reliable
     end
 
     if not targetAngles or (player:GetAbsOrigin() - me:GetAbsOrigin()):Length() < 100 or not lastPosition[player:GetIndex()] then
@@ -1051,7 +1068,7 @@ local function CheckHitscanTarget(me, weapon, player)
     local fov = Math.AngleFov(angles, engine.GetViewAngles())
 
     -- Visiblity Check
-    if not Helpers.VisPos(player, WPlayer:GetLocal():GetViewPos(), GetHitboxPos(player, Menu.Main.AimPos.Hitscan) or Vector3(10,10,-110)) then return nil end
+    if not Helpers.VisPos(player, WPlayer:GetLocal():GetViewPos(), GetHitboxPos(player, Menu.Main.AimPos.Hitscan) or Vector3(10, 10, -110)) then return nil end
 
     -- The target is valid
     local target = { entity = player, angles = angles, factor = fov }
@@ -1067,13 +1084,13 @@ local function GetBestTarget(me, weapon)
 
     if weapon:IsShootingWeapon() then
         local projType = weapon:GetWeaponProjectileType()
-            if projType == 1 then
-                -- Hitscan weapon
-                Menu.Main.AimPos.CurrentAimPos = Menu.Main.AimPos.Hitscan
-            else
-                -- Projectile weapon
-                Menu.Main.AimPos.CurrentAimPos = Menu.Main.AimPos.Projectile
-            end
+        if projType == 1 then
+            -- Hitscan weapon
+            Menu.Main.AimPos.CurrentAimPos = Menu.Main.AimPos.Hitscan
+        else
+            -- Projectile weapon
+            Menu.Main.AimPos.CurrentAimPos = Menu.Main.AimPos.Projectile
+        end
     else
         return nil
     end
@@ -1081,9 +1098,9 @@ local function GetBestTarget(me, weapon)
 
     for _, player in pairs(players) do
         if player == nil or not player:IsAlive()
-        or player:IsDormant()
-        or player == me or player:GetTeamNumber() == me:GetTeamNumber()
-        or gui.GetValue("ignore cloaked") == 1 and player:InCond(4) then
+            or player:IsDormant()
+            or player == me or player:GetTeamNumber() == me:GetTeamNumber()
+            or gui.GetValue("ignore cloaked") == 1 and player:InCond(4) then
             goto continue
         end
 
@@ -1091,8 +1108,8 @@ local function GetBestTarget(me, weapon)
 
         local playerOrigin = player:GetAbsOrigin()
         local distance = math.abs(playerOrigin.x - localPlayerOrigin.x) +
-                         math.abs(playerOrigin.y - localPlayerOrigin.y) +
-                         math.abs(playerOrigin.z - localPlayerOrigin.z)
+            math.abs(playerOrigin.y - localPlayerOrigin.y) +
+            math.abs(playerOrigin.z - localPlayerOrigin.z)
 
         local angles = Math.PositionAngles(localPlayerOrigin, playerOrigin)
         local fov = Math.AngleFov(angles, localPlayerViewAngles)
@@ -1103,7 +1120,7 @@ local function GetBestTarget(me, weapon)
 
         local distanceFactor = Math.RemapValClamped(distance, 50, 2500, 1, 0.09)
         local fovFactor = Math.RemapValClamped(fov, 0, Menu.Main.AimFov, 1, 0.7)
-        local isVisible = Helpers.VisPos(player, localPlayerOrigin + Vector3(0,0,75), playerOrigin + Vector3(0,0,75))
+        local isVisible = Helpers.VisPos(player, localPlayerOrigin + Vector3(0, 0, 75), playerOrigin + Vector3(0, 0, 75))
         local visibilityFactor = isVisible and 1 or 0.5
         local factor = fovFactor * visibilityFactor * distanceFactor
 
@@ -1116,23 +1133,23 @@ local function GetBestTarget(me, weapon)
     end
 
     if bestTarget then
-            -- TODO: Improve this
-            if projType == 1 then
-                -- Hitscan weapon
-                --return CheckHitscanTarget(me, weapon, bestTarget)
-            else
-                -- Projectile weapon
-                return CheckProjectileTarget(me, weapon, bestTarget)
-            end
-            --[[elseif weapon:IsMeleeWeapon() then
+        -- TODO: Improve this
+        if projType == 1 then
+            -- Hitscan weapon
+            --return CheckHitscanTarget(me, weapon, bestTarget)
+        else
+            -- Projectile weapon
+            return CheckProjectileTarget(me, weapon, bestTarget)
+        end
+        --[[elseif weapon:IsMeleeWeapon() then
             -- TODO: Melee Aimbot]]
-            return bestTarget
+        return bestTarget
     else
         return nil
     end
 end
 
-local EMPTY_VECTOR = Vector3(0, 0, 0)  -- Represents an empty vector for zero velocity cases
+local EMPTY_VECTOR = Vector3(0, 0, 0) -- Represents an empty vector for zero velocity cases
 
 ---@param userCmd UserCmd
 local function OnCreateMove(userCmd)
@@ -1166,6 +1183,7 @@ local function OnCreateMove(userCmd)
 
     -- Get the best target
     local currentTarget = GetBestTarget(me, weapon)
+    debug_currentTarget = currentTarget
     if currentTarget == nil then
         return
     end
@@ -1181,7 +1199,7 @@ local function OnCreateMove(userCmd)
         if currentTarget == nil then return end
 
         if weapon:GetWeaponID() == TF_WEAPON_COMPOUND_BOW then
-        --or weapon:GetWeaponID() == TF_WEAPON_PIPEBOMBLAUNCHER then
+            --or weapon:GetWeaponID() == TF_WEAPON_PIPEBOMBLAUNCHER then
             -- Huntsman
             if weapon:GetChargeBeginTime() > 0 then
                 userCmd.buttons = userCmd.buttons & ~IN_ATTACK
@@ -1203,11 +1221,11 @@ end
 
 local current_fps = 0
 local last_fps_check = 0
-local fps_check_interval = 8 -- check FPS every 100 frames
-local fps_threshold = 59 -- increase values if FPS is equal to or higher than 59
+local fps_check_interval = 8  -- check FPS every 100 frames
+local fps_threshold = 59      -- increase values if FPS is equal to or higher than 59
 local last_increase_frame = 0 -- last frame when values were increased
 
-local font = draw.CreateFont( "Verdana", 12, 400, FONTFLAG_OUTLINE )
+local font = draw.CreateFont("Verdana", 12, 400, FONTFLAG_OUTLINE)
 
 local function L_line(start_pos, end_pos, secondary_line_size)
     if not (start_pos and end_pos) then
@@ -1235,16 +1253,16 @@ end
 
 local hitPos = {}
 local function PlayerHurtEvent(event)
-    if (event:GetName() == 'player_hurt' ) and Menu.Visuals.VisualizeHitPos then
+    if (event:GetName() == 'player_hurt') and Menu.Visuals.VisualizeHitPos then
         local localPlayer = entities.GetLocalPlayer();
         local victim = entities.GetByUserID(event:GetInt("userid"))
         local attacker = entities.GetByUserID(event:GetInt("attacker"))
         if (attacker == nil or localPlayer:GetIndex() ~= attacker:GetIndex()) then
             return
         end
-        table.insert(hitPos, 1, {box = victim:HitboxSurroundingBox(), time = globals.RealTime()})
+        table.insert(hitPos, 1, { box = victim:HitboxSurroundingBox(), time = globals.RealTime() })
     end
-    if #hitPos > 1 then 
+    if #hitPos > 1 then
         table.remove(hitPos)
     end
 end
@@ -1252,7 +1270,7 @@ callbacks.Register("FireGameEvent", "PlayerHurtEvent", PlayerHurtEvent)
 
 local clear_lines = 0
 local bindTimer = 0
-local bindDelay = 0.15  -- Delay of 0.2 seconds
+local bindDelay = 0.15 -- Delay of 0.2 seconds
 
 local function handleKeybind(noKeyText, keybind, keybindName)
     if KeybindName ~= "Press The Key" and ImMenu.Button(KeybindName or noKeyText) then
@@ -1287,7 +1305,7 @@ local function OnDraw()
     draw.SetFont(Fonts.Verdana)
     draw.Color(255, 255, 255, 255)
 
-    if input.IsButtonPressed( KEY_INSERT )then
+    if input.IsButtonPressed(KEY_INSERT) then
         toggleMenu()
     end
     --[[ Dynamic optymisator
@@ -1310,7 +1328,7 @@ local function OnDraw()
         end
     end]]
 
-    if not input.IsButtonDown( Menu.Main.AimKey ) then
+    if not input.IsButtonDown(Menu.Main.AimKey) then
         if (globals.RealTime() > (clear_lines + 5)) then
             vPath = {}
             clear_lines = globals.RealTime()
@@ -1326,58 +1344,59 @@ local function OnDraw()
             local pos1 = vPath[i]
             local pos2 = vPath[i + 1]
 
-            if i == 1 then 
+            if i == 1 then
                 startPos = pos1
             end
-                
+
             draw.Color(255 - math.floor((hitChance / 100) * 255), math.floor((hitChance / 100) * 255), 0, 255)
- 
-               --draw predicted local position with strafe prediction
-               if projectileSimulation2 and projectileSimulation2 ~= EMPTY_VECTOR then
+
+            --draw predicted local position with strafe prediction
+            if projectileSimulation2 and projectileSimulation2 ~= EMPTY_VECTOR then
                 local screenPos = client.WorldToScreen(projectileSimulation2)
-                    if screenPos ~= nil then
-                        draw.Line( screenPos[1] + 10, screenPos[2], screenPos[1] - 10, screenPos[2])
-                        draw.Line( screenPos[1], screenPos[2] - 10, screenPos[1], screenPos[2] + 10)
-                    end
+                if screenPos ~= nil then
+                    draw.Line(screenPos[1] + 10, screenPos[2], screenPos[1] - 10, screenPos[2])
+                    draw.Line(screenPos[1], screenPos[2] - 10, screenPos[1], screenPos[2] + 10)
                 end
-    
-            if Menu.Visuals.VisualizeHitchance or Menu.Visuals.Crosshair or Menu.Visuals.NccPred then 
-                if i == #vPath - 1 then 
+            end
+
+            if Menu.Visuals.VisualizeHitchance or Menu.Visuals.Crosshair or Menu.Visuals.NccPred then
+                if i == #vPath - 1 then
                     local screenPos1 = client.WorldToScreen(pos1)
                     local screenPos2 = client.WorldToScreen(pos2)
-            
+
                     if screenPos1 ~= nil and screenPos2 ~= nil then
                         if Menu.Visuals.VisualizeHitchance then
                             local width = draw.GetTextSize(math.floor(hitChance))
                             draw.Text(screenPos2[1] - math.floor(width / 2), screenPos2[2] + 20, math.floor(hitChance))
                         end
-                        if Menu.Visuals.Crosshair then 
+                        if Menu.Visuals.Crosshair then
                             local c_size = 8
                             draw.Line(screenPos2[1] - c_size, screenPos2[2], screenPos2[1] + c_size, screenPos2[2])
                             draw.Line(screenPos2[1], screenPos2[2] - c_size, screenPos2[1], screenPos2[2] + c_size)
                         end
-                        if Menu.Visuals.NccPred then 
+                        if Menu.Visuals.NccPred then
                             local c_size = 5
-                            draw.FilledRect(screenPos2[1] - c_size, screenPos2[2]  - c_size, screenPos2[1] + c_size, screenPos2[2]  + c_size)
+                            draw.FilledRect(screenPos2[1] - c_size, screenPos2[2] - c_size, screenPos2[1] + c_size,
+                                screenPos2[2] + c_size)
                             local w2s = client.WorldToScreen(startPos)
-                            if w2s and some_condition then  -- Replace `some_condition` with your actual condition.
+                            if w2s and some_condition then -- Replace `some_condition` with your actual condition.
                                 draw.Line(w2s[1], w2s[2], screenPos2[1], screenPos2[2])
                             end
-                        end                        
+                        end
                     end
                 end
             end
 
             if Menu.Visuals.VisualizePath then
-                if Menu.Visuals.Path_styles_selected == 1 or Menu.Visuals.Path_styles_selected == 3 then 
+                if Menu.Visuals.Path_styles_selected == 1 or Menu.Visuals.Path_styles_selected == 3 then
                     local screenPos1 = client.WorldToScreen(pos1)
                     local screenPos2 = client.WorldToScreen(pos2)
-            
+
                     if screenPos1 ~= nil and screenPos2 ~= nil and (not (Menu.Visuals.Path_styles_selected == 3) or i % 2 == 1) then
                         draw.Line(screenPos1[1], screenPos1[2], screenPos2[1], screenPos2[2])
                     end
                 end
-    
+
                 if Menu.Visuals.Path_styles_selected == 2 then
                     L_line(pos1, pos2, 10)
                 end
@@ -1388,10 +1407,10 @@ local function OnDraw()
                         local pos2 = projectileSimulation[i + 1]
 
                         if pos1 and pos2 then
-                            if Menu.Visuals.Path_styles_selected == 1 or Menu.Visuals.Path_styles_selected == 3 then 
+                            if Menu.Visuals.Path_styles_selected == 1 or Menu.Visuals.Path_styles_selected == 3 then
                                 local screenPos1 = client.WorldToScreen(pos1)
                                 local screenPos2 = client.WorldToScreen(pos2)
-                        
+
                                 if screenPos1 ~= nil and screenPos2 ~= nil and (not (Menu.Visuals.Path_styles_selected == 3) or i % 2 == 1) then
                                     draw.Line(screenPos1[1], screenPos1[2], screenPos2[1], screenPos2[2])
                                 end
@@ -1406,11 +1425,11 @@ local function OnDraw()
         end
 
         if Menu.Visuals.VisualizeHitPos then
-            for i,v in pairs(hitPos) do 
+            for i, v in pairs(hitPos) do
                 if globals.RealTime() - v.time > 1 then
                     table.remove(hitPos, i)
                 else
-                    draw.Color( 255,255,255,255 )
+                    draw.Color(255, 255, 255, 255)
                     local hitboxes = v.box
                     local min = hitboxes[1]
                     local max = hitboxes[2]
@@ -1428,7 +1447,7 @@ local function OnDraw()
                     for j, vertex in ipairs(vertices) do
                         local screenPos = client.WorldToScreen(vertex)
                         if screenPos ~= nil then
-                            screenVertices[j] = {x = screenPos[1], y = screenPos[2]}
+                            screenVertices[j] = { x = screenPos[1], y = screenPos[2] }
                         end
                     end
                     for j = 1, 4 do
@@ -1448,7 +1467,7 @@ local function OnDraw()
                             draw.Line(vertex1.x, vertex1.y, vertex2.x, vertex2.y)
                         end
                     end
-                end   
+                end
             end
         end
     end
@@ -1470,7 +1489,7 @@ local function OnDraw()
         local weapon = me:GetActiveWeapon()
         if not weapon then goto continue end
 
-            -- Draw current weapon
+        -- Draw current weapon
         draw.Text(20, 220, string.format("Weapon: %s", weapon:GetName()))
         draw.Text(20, 240, string.format("Weapon ID: %d", weapon:GetWeaponID()))
         draw.Text(20, 260, string.format("Weapon DefIndex: %d", weapon:GetDefIndex()))
@@ -1483,14 +1502,14 @@ local function OnDraw()
 
     --if Menu.Visuals.VisualizeProjectile then
     --draw predicted local position with strafe prediction
-        -- local screenPos = client.WorldToScreen(shootpos1)
-        -- if screenPos ~= nil then
-        --     draw.Line( screenPos[1] + 10, screenPos[2], screenPos[1] - 10, screenPos[2])
-        --     draw.Line( screenPos[1], screenPos[2] - 10, screenPos[1], screenPos[2] + 10)
-        -- end
+    -- local screenPos = client.WorldToScreen(shootpos1)
+    -- if screenPos ~= nil then
+    --     draw.Line( screenPos[1] + 10, screenPos[2], screenPos[1] - 10, screenPos[2])
+    --     draw.Line( screenPos[1], screenPos[2] - 10, screenPos[1], screenPos[2] + 10)
+    -- end
     --end
     ::continue::
-    
+
     --if Menu.Visuals.VisualizeProjectile then
     --[[draw predicted local position with strafe prediction
         local screenPos = client.WorldToScreen(shootpos1)
@@ -1502,7 +1521,7 @@ local function OnDraw()
 
     if Lbox_Menu_Open == true and ImMenu.Begin("Custom Projectile Aimbot", true) then -- managing the menu
         --local menuWidth, menuHeight = 2500, 3000
-        ImMenu.BeginFrame(1) -- tabs
+        ImMenu.BeginFrame(1)                                                          -- tabs
         if ImMenu.Button("Main") then
             Menu.tabs.Main = true
             Menu.tabs.Advanced = false
@@ -1536,15 +1555,15 @@ local function OnDraw()
             ImMenu.EndFrame()
 
             ImMenu.BeginFrame(1)
-            Menu.Main.AimFov = ImMenu.Slider("Fov", Menu.Main.AimFov , 0.1, 360, 0.1)
+            Menu.Main.AimFov = ImMenu.Slider("Fov", Menu.Main.AimFov, 0.1, 360, 0.1)
             ImMenu.EndFrame()
 
             ImMenu.BeginFrame(1)
-            Menu.Main.MinHitchance = ImMenu.Slider("Min Hitchance", Menu.Main.MinHitchance , 1, 100)
+            Menu.Main.MinHitchance = ImMenu.Slider("Min Hitchance", Menu.Main.MinHitchance, 1, 100)
             ImMenu.EndFrame()
 
             ImMenu.BeginFrame(1)
-                Menu.Main.AimKey, Menu.Main.AimkeyName = handleKeybind("Aim Key: ", Menu.Main.AimKey, Menu.Main.AimkeyName)
+            Menu.Main.AimKey, Menu.Main.AimkeyName = handleKeybind("Aim Key: ", Menu.Main.AimKey, Menu.Main.AimkeyName)
             ImMenu.EndFrame()
 
             --[[ImMenu.BeginFrame(1)
@@ -1554,33 +1573,34 @@ local function OnDraw()
         end
 
         if Menu.tabs.Advanced then
-
             ImMenu.BeginFrame(1)
-                Menu.Advanced.StrafePrediction = ImMenu.Checkbox("Strafe Pred", Menu.Advanced.StrafePrediction)
+            Menu.Advanced.StrafePrediction = ImMenu.Checkbox("Strafe Pred", Menu.Advanced.StrafePrediction)
             ImMenu.EndFrame()
 
             ImMenu.BeginFrame(1)
-                Menu.Advanced.SplashPrediction = ImMenu.Checkbox("Splash Prediction", Menu.Advanced.SplashPrediction)
-            ImMenu.EndFrame()
-            
-            ImMenu.BeginFrame(1)
-                Menu.Advanced.SplashAccuracy = ImMenu.Slider("Splash Accuracy", Menu.Advanced.SplashAccuracy, 3, 10)
+            Menu.Advanced.SplashPrediction = ImMenu.Checkbox("Splash Prediction", Menu.Advanced.SplashPrediction)
             ImMenu.EndFrame()
 
             ImMenu.BeginFrame(1)
-                Menu.Advanced.StrafeSamples = ImMenu.Slider("Strafe Samples", Menu.Advanced.StrafeSamples, 2, 30)
+            Menu.Advanced.SplashAccuracy = ImMenu.Slider("Splash Accuracy", Menu.Advanced.SplashAccuracy, 3, 10)
             ImMenu.EndFrame()
 
             ImMenu.BeginFrame(1)
-                Menu.Advanced.PredTicks = ImMenu.Slider("PredTicks", Menu.Advanced.PredTicks , 66, 150)
-            ImMenu.EndFrame()
-            
-            ImMenu.BeginFrame(1)
-                Menu.Advanced.Hitchance_Accuracy = ImMenu.Slider("Accuracy", Menu.Advanced.Hitchance_Accuracy , 1, Menu.Advanced.PredTicks)
+            Menu.Advanced.StrafeSamples = ImMenu.Slider("Strafe Samples", Menu.Advanced.StrafeSamples, 2, 30)
             ImMenu.EndFrame()
 
             ImMenu.BeginFrame(1)
-                Menu.Advanced.ProjectileSegments = ImMenu.Slider("projectile Simulation Segments", Menu.Advanced.ProjectileSegments, 3, 50)
+            Menu.Advanced.PredTicks = ImMenu.Slider("PredTicks", Menu.Advanced.PredTicks, 66, 150)
+            ImMenu.EndFrame()
+
+            ImMenu.BeginFrame(1)
+            Menu.Advanced.Hitchance_Accuracy = ImMenu.Slider("Accuracy", Menu.Advanced.Hitchance_Accuracy, 1,
+                Menu.Advanced.PredTicks)
+            ImMenu.EndFrame()
+
+            ImMenu.BeginFrame(1)
+            Menu.Advanced.ProjectileSegments = ImMenu.Slider("projectile Simulation Segments",
+                Menu.Advanced.ProjectileSegments, 3, 50)
             ImMenu.EndFrame()
 
             --[[ImMenu.BeginFrame(1)
@@ -1595,33 +1615,35 @@ local function OnDraw()
             ImMenu.EndFrame()]]
         end
 
-        if Menu.tabs.Visuals then 
+        if Menu.tabs.Visuals then
             ImMenu.BeginFrame(1)
-            Menu.Visuals.Active = ImMenu.Checkbox("Enable", Menu.Visuals.Active )
+            Menu.Visuals.Active = ImMenu.Checkbox("Enable", Menu.Visuals.Active)
             ImMenu.EndFrame()
 
-            if  Menu.Visuals.Active then 
+            if Menu.Visuals.Active then
                 ImMenu.BeginFrame(1)
                 Menu.Visuals.VisualizePath = ImMenu.Checkbox("Player Path", Menu.Visuals.VisualizePath)
-                Menu.Visuals.VisualizeProjectile = ImMenu.Checkbox("Projectile Simulation", Menu.Visuals.VisualizeProjectile)
+                Menu.Visuals.VisualizeProjectile = ImMenu.Checkbox("Projectile Simulation",
+                    Menu.Visuals.VisualizeProjectile)
                 ImMenu.EndFrame()
-    
+
                 ImMenu.BeginFrame(1)
                 Menu.Visuals.VisualizeHitPos = ImMenu.Checkbox("Visualize Hit Pos", Menu.Visuals.VisualizeHitPos)
                 Menu.Visuals.Crosshair = ImMenu.Checkbox("Crosshair", Menu.Visuals.Crosshair)
                 Menu.Visuals.NccPred = ImMenu.Checkbox("Nullcore Pred Visuals", Menu.Visuals.NccPred)
                 ImMenu.EndFrame()
-    
+
                 ImMenu.BeginFrame(1)
                 Menu.Visuals.VisualizeHitchance = ImMenu.Checkbox("Visualize Hitchance", Menu.Visuals.VisualizeHitchance)
                 ImMenu.EndFrame()
 
-                if Menu.Visuals.VisualizePath then 
+                if Menu.Visuals.VisualizePath then
                     ImMenu.BeginFrame(1)
                     ImMenu.Text("Visualize Path Settings")
                     ImMenu.EndFrame()
                     ImMenu.BeginFrame(1)
-                    Menu.Visuals.Path_styles_selected = ImMenu.Option(Menu.Visuals.Path_styles_selected, Menu.Visuals.Path_styles)
+                    Menu.Visuals.Path_styles_selected = ImMenu.Option(Menu.Visuals.Path_styles_selected,
+                        Menu.Visuals.Path_styles)
                     ImMenu.EndFrame()
                 end
             end
@@ -1662,31 +1684,30 @@ local function PropUpdate()
     --for i = 0, 23 do
         pLocal:SetPropDataTableFloat(100, i, "m_flPoseParameter")
     end
-    local viewmodelData =  pLocal:GetPropDataTableFloat("m_flPoseParameter") --213 reload no scope , 211 reload scope, 
+    local viewmodelData =  pLocal:GetPropDataTableFloat("m_flPoseParameter") --213 reload no scope , 211 reload scope,
     --printLuaTable(viewmodelData)
 
     --viewmodel:GetPropDataTableFloat("m_vecOrigin")
     --print(viewmodel)
 
 
-    --pLocal:SetPropDataTableFloat(1000, 0, 0)    
+    --pLocal:SetPropDataTableFloat(1000, 0, 0)
     --pLocal:SetPropVector(Vector3(10000, 10000, 100000), "m_bDrawViewmodel")
- 
+
     --pLocal:SetPropInt(1000, "m_Resolution")
     --local resolution =  pLocal:GetPropVector("m_Resolution") --213 reload no scope , 211 reload scope, ]]
- 
 end
 
---[[ Remove the menu when unloaded ]]--
-local function OnUnload()                                -- Called when the script is unloaded
+--[[ Remove the menu when unloaded ]]                         --
+local function OnUnload()                                     -- Called when the script is unloaded
     CreateCFG(string.format([[Lua %s]], Lua__fileName), Menu) --saving the config
-    UnloadLib() --unloading lualib
-    client.Command('play "ui/buttonclickrelease"', true) -- Play the "buttonclickrelease" sound
+    UnloadLib()                                               --unloading lualib
+    client.Command('play "ui/buttonclickrelease"', true)      -- Play the "buttonclickrelease" sound
 end
 
---[[ Unregister previous callbacks ]]--
-callbacks.Unregister("PostPropUpdate","ProjCamProp")
-callbacks.Register("PostPropUpdate","ProjCamProp", PropUpdate)
+--[[ Unregister previous callbacks ]] --
+callbacks.Unregister("PostPropUpdate", "ProjCamProp")
+callbacks.Register("PostPropUpdate", "ProjCamProp", PropUpdate)
 
 callbacks.Unregister("CreateMove", "LNX.Aimbot.CreateMove")
 callbacks.Register("CreateMove", "LNX.Aimbot.CreateMove", OnCreateMove)
@@ -1696,5 +1717,5 @@ callbacks.Register("Unload", "LNX.Aimbot.OnUnload", OnUnload)
 
 callbacks.Unregister("Draw", "LNX.Aimbot.Draw")
 callbacks.Register("Draw", "LNX.Aimbot.Draw", OnDraw)
---[[ Play sound when loaded ]]--
+--[[ Play sound when loaded ]]                --
 client.Command('play "ui/buttonclick"', true) -- Play the "buttonclick" sound when the script is loaded

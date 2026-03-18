@@ -997,6 +997,7 @@ local function OnCreateMove(userCmd)
 
    -- Get the best target
    local currentTarget = GetBestTarget(me, weapon)
+   debug_currentTarget = currentTarget
    if currentTarget == nil then
       return
    end

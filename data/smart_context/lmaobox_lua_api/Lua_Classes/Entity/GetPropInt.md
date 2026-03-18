@@ -62,3 +62,5 @@ end
 - Returns **0** if prop missing
 - Use exact table name and field (e.g., `m_hActiveWeapon`, `m_iHealth`)
 - For vectors use `GetPropVector`; for floats use `GetPropFloat`
+- On dormant players, a prop read may still return a value, but it can be stale because the server is no longer fully networking that entity
+- Do not treat dormant-player prop values as trustworthy for targeting, health checks, flags, or other gameplay decisions

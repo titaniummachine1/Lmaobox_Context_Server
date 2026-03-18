@@ -37,7 +37,7 @@ local Hitbox = {
 
 local Menu = { -- this is the config that will be loaded every time u load the script
 
-   tabs = {   -- dont touch this, this is just for managing the tabs in the menu
+   tabs = {    -- dont touch this, this is just for managing the tabs in the menu
       Main = true,
       Advanced = false,
       Visuals = false,
@@ -357,7 +357,7 @@ local function calculateHitChancePercentage(lastPredictedPos, currentPos)
 
    -- Define maximum acceptable distances
    local maxHorizontalDistance = 12 -- Max acceptable horizontal distance in units
-   local maxVerticalDistance = 45 -- Max acceptable vertical distance in units
+   local maxVerticalDistance = 45   -- Max acceptable vertical distance in units
 
    -- Normalize the distances to a 0-1 scale
    local horizontalFactor = math.min(horizontalDistance / maxHorizontalDistance, 1)
@@ -489,8 +489,8 @@ end
 
 -- Precompute and cache frequently used constants and empty vectors
 local MASK_PLAYERSOLID = 100679691 -- Example value; replace with the actual value from your environment for tracing
-local FULL_HIT_FRACTION = 1.0           -- Represents a full hit fraction in trace results
-local DRAG_COEFFICIENT = 0.029374       -- Combined drag coefficients for drag simulation
+local FULL_HIT_FRACTION = 1.0      -- Represents a full hit fraction in trace results
+local DRAG_COEFFICIENT = 0.029374  -- Combined drag coefficients for drag simulation
 
 -- Function to solve projectile trajectory and return the necessary angles and time to hit a target
 ---@param origin Vector3  -- The starting position of the projectile
@@ -551,7 +551,7 @@ local function SolveProjectile(origin, dest, speed, gravity, sv_gravity, target,
 
       -- Solve the quadratic equation for projectile motion
       local discriminant = speed_squared * speed_squared -
-         effective_gravity * (gravity_horizontal_squared + 2 * vertical_distance * speed_squared)
+          effective_gravity * (gravity_horizontal_squared + 2 * vertical_distance * speed_squared)
       if discriminant < 0 then return nil end -- No real solution, so return nil
 
       -- Calculate the pitch and yaw angles required for the projectile to reach the target
@@ -590,10 +590,10 @@ local function SolveProjectile(origin, dest, speed, gravity, sv_gravity, target,
          -- Calculate the new position based on current velocity, pitch, yaw, and gravity
          local horizontal_displacement = current_velocity * math_cos(pitch_angle) * time_segment
          local vertical_displacement = current_velocity * math_sin(pitch_angle) * time_segment -
-            0.5 * effective_gravity * time_segment * time_segment
+             0.5 * effective_gravity * time_segment * time_segment
          local new_position = origin +
-            Vector3(horizontal_displacement * math_cos(yaw_angle), horizontal_displacement * math_sin(yaw_angle),
-               vertical_displacement)
+             Vector3(horizontal_displacement * math_cos(yaw_angle), horizontal_displacement * math_sin(yaw_angle),
+                vertical_displacement)
 
          -- Perform a trace to check for collisions
          local trace = TraceLine(current_position, new_position, MASK_PLAYERSOLID, shouldHitEntity)
@@ -631,7 +631,7 @@ end
 local function calculateTrustFactor(numRecords, maxRecords, growthRate)
    -- Ensure we avoid division by zero
    if maxRecords == 0 then
-       return 0
+      return 0
    end
 
    -- Calculate the ratio of current records to maximum records
@@ -642,7 +642,7 @@ local function calculateTrustFactor(numRecords, maxRecords, growthRate)
 
    -- Ensure the trust factor is capped at 1
    if trustFactor > 1 then
-       trustFactor = 1
+      trustFactor = 1
    end
 
    -- Round the trust factor to 2 decimal places
@@ -658,43 +658,43 @@ local function calculateAdjustedHitChance(hitChance, trustFactor)
 end
 
 local function GetBonePosition(entity, hitbox)
-    local model = entity:GetModel()
-    local studioHdr = models.GetStudioModel(model)
+   local model = entity:GetModel()
+   local studioHdr = models.GetStudioModel(model)
 
-    local myHitBoxSet = entity:GetPropInt("m_nHitboxSet")
-    local hitboxSet = studioHdr:GetHitboxSet(myHitBoxSet)
-    local hitboxes = hitboxSet:GetHitboxes()
-    local boneMatrices = entity:SetupBones()
-    local hitbox = hitboxes[hitbox]
-    local bone = hitbox:GetBone()
-    local boneMatrix = boneMatrices[bone]
-    if boneMatrix == nil then return nil end
-    local bonePos = Vector3( boneMatrix[1][4], boneMatrix[2][4], boneMatrix[3][4] )
-    return bonePos
+   local myHitBoxSet = entity:GetPropInt("m_nHitboxSet")
+   local hitboxSet = studioHdr:GetHitboxSet(myHitBoxSet)
+   local hitboxes = hitboxSet:GetHitboxes()
+   local boneMatrices = entity:SetupBones()
+   local hitbox = hitboxes[hitbox]
+   local bone = hitbox:GetBone()
+   local boneMatrix = boneMatrices[bone]
+   if boneMatrix == nil then return nil end
+   local bonePos = Vector3(boneMatrix[1][4], boneMatrix[2][4], boneMatrix[3][4])
+   return bonePos
 end
 
 ---@param player Entity
-local function GetBodyPosition (player)
-    return GetBonePosition(player, Hitbox.Pelvis)
+local function GetBodyPosition(player)
+   return GetBonePosition(player, Hitbox.Pelvis)
 end
 
 local function GetHeadPosition(player)
-    return GetBonePosition(player, Hitbox.Head)
+   return GetBonePosition(player, Hitbox.Head)
 end
 
-local function GetFeetPosition (player)
-    return player:GetAbsOrigin() + Vector3(0,0,10)
+local function GetFeetPosition(player)
+   return player:GetAbsOrigin() + Vector3(0, 0, 10)
 end
 
 local function GetAimPos(weapon, player)
    --local aimPos = weapon:GetWeaponProjectileType() == E_ProjectileType.TF_PROJECTILE_ROCKET and GetFeetPosition(player) or weapon:GetWeaponProjectileType() == E_ProjectileType.TF_PROJECTILE_ARROW and GetHeadPosition(player) or GetBodyPosition(player)
    if weapon:GetWeaponProjectileType() == E_ProjectileType.TF_PROJECTILE_ROCKET
-   or weapon:GetWeaponProjectileType() == E_ProjectileType.TF_PROJECTILE_PIPEBOMB then
+       or weapon:GetWeaponProjectileType() == E_ProjectileType.TF_PROJECTILE_PIPEBOMB then
       return GetFeetPosition(player)
    elseif weapon:GetWeaponProjectileType() == E_ProjectileType.TF_PROJECTILE_ARROW then
       local class = player:GetPropInt("m_PlayerClass", "m_iClass")
       --- player is a medic or sniper?
-      if class == 2 then --- medic
+      if class == 2 then     --- medic
          return GetBodyPosition(player)
       elseif class == 5 then --- sniper
          return GetHeadPosition(player)
@@ -722,7 +722,7 @@ local function CheckProjectileTarget(me, weapon, player)
    -- trace ignore simulated player
    local function shouldHitEntity(entity)
       return entity:GetIndex() ~= player:GetIndex() or
-         entity:GetTeamNumber() ~= player:GetTeamNumber()
+          entity:GetTeamNumber() ~= player:GetTeamNumber()
    end
 
    -- Check initial conditions
@@ -886,16 +886,16 @@ local function GetBestTarget(me, weapon)
 
    for _, player in pairs(players) do
       if player == nil or not player:IsAlive()
-         or player:IsDormant()
-         or player == me or player:GetTeamNumber() == me:GetTeamNumber()
-         or gui.GetValue("ignore cloaked") == 1 and player:InCond(4) then
+          or player:IsDormant()
+          or player == me or player:GetTeamNumber() == me:GetTeamNumber()
+          or gui.GetValue("ignore cloaked") == 1 and player:InCond(4) then
          goto continue
       end
 
       local playerOrigin = player:GetAbsOrigin()
       local distance = math.abs(playerOrigin.x - localPlayerOrigin.x) +
-         math.abs(playerOrigin.y - localPlayerOrigin.y) +
-         math.abs(playerOrigin.z - localPlayerOrigin.z)
+          math.abs(playerOrigin.y - localPlayerOrigin.y) +
+          math.abs(playerOrigin.z - localPlayerOrigin.z)
 
       local angles = Math.PositionAngles(localPlayerOrigin, playerOrigin)
       local fov = Math.AngleFov(angles, localPlayerViewAngles)
@@ -963,7 +963,7 @@ local function OnCreateMove(userCmd)
       return
    end
 
-    --- oh no this is horrible
+   --- oh no this is horrible
    Menu.Main.AimFov = gui.GetValue("aim fov")
    Menu.Main.AimKey = gui.GetValue("aim key")
    Menu.Main.AutoShoot = gui.GetValue("auto shoot") == 1
@@ -997,6 +997,7 @@ local function OnCreateMove(userCmd)
 
    -- Get the best target
    local currentTarget = GetBestTarget(me, weapon)
+   debug_currentTarget = currentTarget
    if currentTarget == nil then
       return
    end
@@ -1230,7 +1231,7 @@ local function OnDraw()
    ::continue::
 
    if gui.IsMenuOpen() and ImMenu.Begin("Custom Projectile Aimbot", true) then -- managing the menu
-      ImMenu.BeginFrame(1)                                                 -- tabs
+      ImMenu.BeginFrame(1)                                                     -- tabs
       if ImMenu.Button("Main") then
          Menu.tabs.Main = true
          Menu.tabs.Advanced = false
@@ -1326,11 +1327,11 @@ local function OnDraw()
    end
 end
 
---[[ Remove the menu when unloaded ]]                      --
-local function OnUnload()                                  -- Called when the script is unloaded
+--[[ Remove the menu when unloaded ]]                        --
+local function OnUnload()                                    -- Called when the script is unloaded
    CreateCFG(string.format([[Lua %s]], Lua__fileName), Menu) --saving the config
-   UnloadLib()                                            --unloading lualib
-   client.Command('play "ui/buttonclickrelease"', true)   -- Play the "buttonclickrelease" sound
+   UnloadLib()                                               --unloading lualib
+   client.Command('play "ui/buttonclickrelease"', true)      -- Play the "buttonclickrelease" sound
 end
 
 --[[ Unregister previous callbacks ]] --

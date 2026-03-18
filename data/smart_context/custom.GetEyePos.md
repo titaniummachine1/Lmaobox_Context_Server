@@ -7,6 +7,7 @@
 - Entity props: `m_vecViewOffset[0]`
 - Types: Vector3, Entity
 - Functions: Entity.GetAbsOrigin, Entity.GetPropVector
+- If you already have a `WPlayer`, prefer `WPlayer:GetViewPos()` over rebuilding eye position manually
 
 ### Curated Usage Examples
 
@@ -48,3 +49,20 @@ end
 local me = entities.GetLocalPlayer()
 local eyePos = me:GetAbsOrigin() + me:GetPropVector("localdata", "m_vecViewOffset[0]")
 ```
+
+#### Preferred wrapper usage with lnxLib
+
+```lua
+local me = WPlayer.GetLocal()
+if not me then
+    return
+end
+
+local eyePos = me:GetViewPos()
+```
+
+### Notes
+
+- Base `Entity` code commonly computes eye position manually from origin + view offset
+- With lnxLib wrappers, `WPlayer:GetViewPos()` is the preferred form
+- Do not rely on a generic base-entity `GetEyePos()` helper existing everywhere; many scripts implement their own helper because the common primitive is `GetPropVector("localdata", "m_vecViewOffset[0]")`

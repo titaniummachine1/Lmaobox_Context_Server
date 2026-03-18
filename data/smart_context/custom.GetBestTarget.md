@@ -7,6 +7,7 @@
 - Functions: entities.FindByClass, Entity:IsAlive, Entity:GetTeamNumber, IsVisible, DistanceTo, AngleToPosition
 - Types: Entity, Vector3
 - Constants: TEAM (2/3 in TF2), MASK_SHOT_HULL for visibility
+- Treat dormant players as invalid for targeting; their props can be stale even if the entity handle still exists
 
 ### Curated Usage Examples
 
@@ -22,7 +23,7 @@ local function GetBestTarget()
     local best, bestDist = nil, math.huge
 
     for _, ply in pairs(entities.FindByClass("CTFPlayer")) do
-        if ply:IsAlive() and ply:GetTeamNumber() ~= myTeam then
+        if ply:IsAlive() and not ply:IsDormant() and ply:GetTeamNumber() ~= myTeam then
             local pos = ply:GetHitboxPos and ply:GetHitboxPos(1) or ply:GetAbsOrigin()
             if pos and IsVisible(eye, pos, me) then
                 local dist = DistanceTo(eye, pos)
@@ -49,7 +50,7 @@ local function GetBestTargetFOV(maxFov)
     local best, bestScore = nil, math.huge
 
     for _, ply in pairs(entities.FindByClass("CTFPlayer")) do
-        if ply:IsAlive() and ply:GetTeamNumber() ~= me:GetTeamNumber() then
+        if ply:IsAlive() and not ply:IsDormant() and ply:GetTeamNumber() ~= me:GetTeamNumber() then
             local head = ply:GetHitboxPos and ply:GetHitboxPos(1) or ply:GetAbsOrigin()
             if head and IsVisible(eye, head, me) then
                 local ang = AngleToPosition(eye, head)
@@ -70,5 +71,8 @@ end
 ### Notes
 
 - Example only: plug in your own scoring (FOV, distance, health, priority)
-- Use `GetHitboxPos(1)` for head when available
+- If lnxLib is available, use `WPlayer:GetHitboxPos(E_Hitbox.Head)` for head center — it wraps the SetupBones pipeline internally and is the preferred approach over raw index probing (`GetHitboxPos(1)` is a plain-Lua fallback for non-lnxLib contexts)
 - Always nil-check local player and visibility
+- Common target-table shape is `entity`, `angles`, and `factor`
+- Projectile-oriented target tables may additionally include `pos`
+- If hitbox data is stale or the player is dormant, do not silently fall back into targeting logic as if the target were valid

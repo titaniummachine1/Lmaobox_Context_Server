@@ -33,6 +33,8 @@ local function GetEntityHitboxes(entity)
 
     for _, hitbox in pairs(hitboxList) do
         local mat = bones[hitbox:GetBone()]
+        -- CRITICAL: bones does NOT contain an entry at bone index 0.
+        -- Some hitboxes legitimately reference bone 0; mat will be nil. Always nil-check before use.
         if mat then
             local vecMins = hitbox:GetBBMin() * flModelScale
             local vecMaxs = hitbox:GetBBMax() * flModelScale
@@ -118,4 +120,3 @@ end
 - Matrix3x4 format: [row][col], position is [1-3][4]
 - Use with models.GetStudioModel to access hitbox data
 - Transform mins/maxs by bone matrix to get world-space corners
-

@@ -1,7 +1,8 @@
 # Auto-Deploy Prototypes to Lmaobox
 # Watches for file changes and deploys automatically
 
-$SourceDir = "c:\Users\Terminatort8000\Desktop\Lmaobox_Context_Server\prototypes"
+$ScriptDir = Split-Path -Parent $PSCommandPath
+$SourceDir = $ScriptDir
 $TargetDir = "C:\Users\Terminatort8000\AppData\Local\lua"
 
 Write-Host "=====================================" -ForegroundColor Cyan
@@ -15,6 +16,10 @@ Write-Host "Watching for .lua file changes..." -ForegroundColor Green
 Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
 Write-Host ""
 
+if (-not (Test-Path $SourceDir)) {
+    throw "Source directory not found: $SourceDir"
+}
+
 # Ensure target directory exists
 if (-not (Test-Path $TargetDir)) {
     New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
@@ -23,7 +28,7 @@ if (-not (Test-Path $TargetDir)) {
 
 # Initial deployment
 Write-Host "[INITIAL] Deploying all .lua files..." -ForegroundColor Cyan
-Get-ChildItem -Path $SourceDir -Filter "*.lua" | ForEach-Object {
+Get-ChildItem -Path $SourceDir -Filter "*.lua" -File | ForEach-Object {
     $dest = Join-Path $TargetDir $_.Name
     Copy-Item $_.FullName -Destination $dest -Force
     Write-Host "[DEPLOYED] $($_.Name)" -ForegroundColor Green
@@ -35,30 +40,36 @@ $watcher = New-Object System.IO.FileSystemWatcher
 $watcher.Path = $SourceDir
 $watcher.Filter = "*.lua"
 $watcher.IncludeSubdirectories = $false
+$watcher.NotifyFilter = [System.IO.NotifyFilters]'FileName, LastWrite, CreationTime, Size'
 $watcher.EnableRaisingEvents = $true
 
 # Debounce helper
-$lastDeployTime = @{}
+$lastDeployTime = [hashtable]::Synchronized(@{})
 $debounceMs = 500
 
 # Deploy function
 $deploy = {
-    param($source)
+    param($source, $targetDir, $debounceState, $debounceMs)
+
+    if (-not (Test-Path $source)) {
+        return
+    }
     
     $fileName = [System.IO.Path]::GetFileName($source)
-    $dest = Join-Path $TargetDir $fileName
+    $dest = Join-Path $targetDir $fileName
     
     # Debounce check
     $now = (Get-Date).Ticks / 10000
-    if ($lastDeployTime.ContainsKey($fileName)) {
-        $elapsed = $now - $lastDeployTime[$fileName]
+    if ($debounceState.ContainsKey($fileName)) {
+        $elapsed = $now - $debounceState[$fileName]
         if ($elapsed -lt $debounceMs) {
             return
         }
     }
-    $lastDeployTime[$fileName] = $now
+    $debounceState[$fileName] = $now
     
     try {
+        Start-Sleep -Milliseconds 100
         Copy-Item $source -Destination $dest -Force
         $time = Get-Date -Format "HH:mm:ss"
         Write-Host "[$time] [UPDATED] $fileName" -ForegroundColor Yellow
@@ -68,19 +79,26 @@ $deploy = {
     }
 }
 
+$messageData = @{
+    Deploy = $deploy
+    TargetDir = $TargetDir
+    DebounceState = $lastDeployTime
+    DebounceMs = $debounceMs
+}
+
 # Event handlers
 $onChange = Register-ObjectEvent $watcher "Changed" -Action {
-    & $event.MessageData $EventArgs.FullPath
-} -MessageData $deploy
+    & $event.MessageData.Deploy $EventArgs.FullPath $event.MessageData.TargetDir $event.MessageData.DebounceState $event.MessageData.DebounceMs
+} -MessageData $messageData
 
 $onCreate = Register-ObjectEvent $watcher "Created" -Action {
-    & $event.MessageData $EventArgs.FullPath
-} -MessageData $deploy
+    & $event.MessageData.Deploy $EventArgs.FullPath $event.MessageData.TargetDir $event.MessageData.DebounceState $event.MessageData.DebounceMs
+} -MessageData $messageData
 
 $onRename = Register-ObjectEvent $watcher "Renamed" -Action {
     $newPath = $EventArgs.FullPath
-    & $event.MessageData $newPath
-} -MessageData $deploy
+    & $event.MessageData.Deploy $newPath $event.MessageData.TargetDir $event.MessageData.DebounceState $event.MessageData.DebounceMs
+} -MessageData $messageData
 
 # Keep running
 try {

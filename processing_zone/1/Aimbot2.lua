@@ -157,7 +157,7 @@ local function CheckProjectileTarget(me, weapon, player)
 
     -- We didn't find a valid prediction
     if not targetAngles then return nil end
-    
+
     -- Calculate the fov
     local fov = Math.AngleFov(targetAngles, engine.GetViewAngles())
 
@@ -259,6 +259,7 @@ local function OnCreateMove(userCmd)
 
     -- Get the best target
     local currentTarget = GetBestTarget(me, weapon)
+    debug_currentTarget = currentTarget
     if not currentTarget then return end
 
     -- Aim at the target
@@ -270,7 +271,7 @@ local function OnCreateMove(userCmd)
     -- Auto Shoot
     if options.AutoShoot then
         if weapon:GetWeaponID() == TF_WEAPON_COMPOUND_BOW
-        or weapon:GetWeaponID() == TF_WEAPON_PIPEBOMBLAUNCHER then
+            or weapon:GetWeaponID() == TF_WEAPON_PIPEBOMBLAUNCHER then
             -- Huntsman
             if weapon:GetChargeBeginTime() > 0 then
                 userCmd.buttons = userCmd.buttons & ~IN_ATTACK
