@@ -33,6 +33,8 @@ data/*.sqlite
 data/*.log
 data/cache/
 data/tmp/
+data/upstream_docs/lbox-src-docs/
+data/upstream_docs/last-sync.txt
 
 # Keep placeholder markers
 !**/.gitkeep

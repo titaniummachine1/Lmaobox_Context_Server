@@ -1,142 +1,107 @@
 # Lmaobox Context Engine (MCP)
 
-Single-purpose MCP server for serving Lmaobox Lua API context, generated types, and curated smart-context notes. Everything is in English to keep the workflow consistent.
+MCP server for Lmaobox Lua context with generated type lookups, curated smart context files, and Lua tooling helpers.
 
-## Requirements
+## Quick Start (Windows)
 
-- **Python 3.9+**
-- **Node.js** (for bundler automation)
-- **Lua 5.4+** - Auto-installed on first use for frictionless setup
-  - ✅ **Auto-Setup**: MCP server automatically downloads and installs Lua 5.4+ to `automations/bin/lua/` on first run
-  - ✅ **Zero Configuration**: No manual installation required - just launch the MCP server
-  - ✅ **Version Detection**: Automatically detects system Lua 5.4+ or uses bundled version
-  - Manual install (optional): Download from [lua.org](https://www.lua.org/download.html) or [LuaBinaries](https://luabinaries.sourceforge.net/)
-  - Supports modern syntax like `&`, `|`, `~`, `<<` bitwise operators to match Lmaobox runtime
+Local clone bootstrap:
 
-## What’s here
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1
+```
 
-- **MCP server** (`src/mcp_server/`): stdio and HTTP server for `get_types` and `get_smart_context`.
-- **Smart context store** (`data/smart_context/`): curated `.md` files per symbol (API or custom helpers).
-- **Generated types** (`types/lmaobox_lua_api/`): Lua type definitions for API, constants, classes, entity props.
-- **Crawler** (`automations/crawler/`): JS crawler and type generator. Run `node automations/refresh-docs.js` to update.
+Remote one-liner bootstrap:
 
-## Running the MCP server
+```powershell
+irm https://raw.githubusercontent.com/titaniummachine1/Lmaobox_Context_Server/main/scripts/install.ps1 | iex
+```
 
-### For Cursor IDE / Claude Desktop (MCP Protocol)
+What install does:
 
-The server supports the MCP (Model Context Protocol) stdio interface for integration with Cursor IDE and Claude Desktop.
+1. Ensures Lua 5.4+ is available (auto-installs to `automations/bin/lua/` when needed).
+2. Installs Node dependencies for bundling/crawler automation.
+3. Pulls the upstream docs repository (`https://github.com/lbox-src/docs`) into `data/upstream_docs/lbox-src-docs/`.
+4. Leaves website crawl refresh optional (`-RunWebRefresh`) so startup stays fast.
 
-**Quick Setup:**
-
-1. Add to Cursor/Claude Desktop MCP config:
+## MCP Config (VS Code / Cursor / Claude)
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "lmaobox-context": {
+      "type": "stdio",
       "command": "python",
       "args": ["C:/path/to/Lmaobox_Context_Server/launch_mcp.py"],
-      "cwd": "C:/path/to/Lmaobox_Context_Server"
+      "cwd": "C:/path/to/Lmaobox_Context_Server",
+      "disabled": false
     }
   }
 }
 ```
 
-2. Restart Cursor/Claude Desktop to load the server
+If you use the bundled executable instead of Python launcher:
 
-**Manual test:**
-
-```bash
-python launch_mcp.py
-# Server will communicate via JSON-RPC over stdin/stdout
+```json
+{
+  "servers": {
+    "lmaobox-context": {
+      "type": "stdio",
+      "command": "C:/path/to/Lmaobox_Context_Server/lmaobox-context-server.exe",
+      "cwd": "C:/path/to/Lmaobox_Context_Server",
+      "disabled": false
+    }
+  }
+}
 ```
 
-### HTTP Server (Alternative)
+## New Here? Start With These Paths
 
-For HTTP-based access:
+- MCP stdio entrypoint: `launch_mcp.py`
+- MCP tool protocol implementation: `src/mcp_server/mcp_stdio.py`
+- HTTP/API logic + symbol lookup: `src/mcp_server/server.py`
+- Smart context content: `data/smart_context/`
+- Generated types used by `get_types`: `types/lmaobox_lua_api/`
+- Bundler and docs automation: `automations/`
 
-```bash
-python -m src.mcp_server.server
-# or
-python src/mcp_server/server.py
+## Available MCP Tools
+
+- `get_types(symbol)`
+- `get_smart_context(symbol)`
+- `bundle(projectDir, entryFile?, bundleOutputDir?, deployDir?)`
+- `luacheck(filePath, checkBundle?)`
+
+## Docs Update Flow
+
+Install-time default:
+
+- `scripts/fetch-upstream-docs.ps1` syncs `https://github.com/lbox-src/docs` into `data/upstream_docs/lbox-src-docs/`
+
+Manual refresh options:
+
+- Upstream docs repo only:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/fetch-upstream-docs.ps1
 ```
 
-Defaults: `127.0.0.1:8765`. Configure via env:
+- Website crawl + type regeneration:
 
-- `MCP_HOST`, `MCP_PORT`
-- `MCP_DB_PATH` (defaults to `.cache/docs-graph.db`)
+```powershell
+node automations/refresh-docs.js
+```
 
-**Available MCP Tools:**
+## Development Notes
 
-- `get_types(symbol)` - Get type information for a Lmaobox Lua API symbol
-  - Reads SQLite `symbol_metadata`; falls back to scanning `types/` for a signature and caches it.
-  - ✅ Fast, non-blocking
-- `get_smart_context(symbol)` - Get curated smart context for a symbol
-  - Nearest-definition search in `data/smart_context/` (e.g., `Foo.Bar.Baz.md`, `Foo.Bar.md`, `Foo.md`), then fuzzy `*symbol*.md`.
-  - ✅ Fast, non-blocking
-- `bundle(projectDir, entryFile?, bundleOutputDir?, deployDir?)` - Bundle and deploy Lua projects
-  - ⚠️ **BLOCKS AI for up to 10 seconds** during execution
-  - ⚠️ **Requires absolute paths** - relative paths resolve from MCP server launch CWD, not active workspace
-  - ⚠️ **Requires MCP server installation** with `automations/bundle-and-deploy.js` and node_modules
-  - ⚠️ **Requires Lua 5.4+** - Uses luac for pre-validation (supports modern syntax like `&` operator)
-  - Bundles Main.lua and dependencies, deploys to `%LOCALAPPDATA%/lua`
-  - Use absolute paths like `C:/my_project` to avoid path confusion
-- `luacheck(filePath, checkBundle?)` - Validate Lua syntax or test bundling
-  - Fast syntax validation using Lua 5.4+ compiler
-  - Automatically detects best available compiler (luac5.4, luac54, luac5.5, luac55, or fallback)
-  - Returns validation status with Lua version used
+- `launch_mcp.py` auto-runs Lua setup so first launch is usually zero-touch.
+- For HTTP mode: `python -m src.mcp_server.server` (default `127.0.0.1:8765`).
+- Health endpoint: `/health`
+- Sample test script: `scripts/test-get-types.ps1`
 
-**HTTP Endpoints (if using HTTP server):**
+## Extra Navigation
 
-- `/health` → `{status:"ok"}`
-- `/get_types?symbol=Symbol.Name` → `{symbol, signature, required_constants, source}`
-- `/smart_context?symbol=Symbol.Name` → `{symbol, path, content}` or 404
-
-### Quick sanity check
-
-1. Start the server (task: **Start MCP Server (bg)**).
-2. Run the VS Code task **Test get_types (sample)** or execute:
-   ```powershell
-   pwsh -File scripts/test-get-types.ps1
-   ```
-   Optional envs: `MCP_HOST`, `MCP_PORT`, `MCP_TEST_SYMBOL` (default symbol: `Draw`).
-
-## Adding smart context (API or custom helpers)
-
-1. Create a markdown file in `data/smart_context/` named after the symbol, e.g. `render.text.md` or `custom.normalize_vector.md`.
-2. Include signature and minimal curated examples (keep it short; 1–3 examples).
-3. If it depends on constants or other helpers, list them up top.
-4. For custom helpers not in docs, follow the same pattern—this lets the AI reuse past solutions instead of reinventing them.
-
-Example file:
-
-````
-## Function/Symbol: custom.normalize_vector
-> Signature: function normalize_vector(vec)
-
-### Required Context:
-- Types: Vector3
-- Notes: Safe even if length is zero (engine handles divide-by-zero).
-
-### Curated Usage Examples:
-```lua
-local function normalize_vector(vec)
-    return vec / vec:Length()
-end
-````
+- Architecture map: `docs/ARCHITECTURE.md`
+- Install and operations guide: `docs/INSTALL_AND_OPERATIONS.md`
 
 ```
 
-## Types and crawler
-- Generated types live in `types/lmaobox_lua_api/` (constants, classes, libraries, entity props, globals).
-- Docs index: `types/docs-index.json`.
-- Crawler entrypoint: `node automations/refresh-docs.js` (see `automations/README.md`).
-- Keep `types/` and `Lmaobox-Annotations-master/`—they seed fast lookups for `get_types`.
-
-## Utility Scripts
-
-- `scripts/mcp_insert_custom.py` - Insert custom smart context into the database
-- `scripts/query_examples.py` - Query and test MCP tools
-- `scripts/restart-mcp.ps1`, `run-mcp.ps1`, `start_mcp.bat` - Server control scripts
-- `scripts/test-get-types.ps1` - Test the get_types endpoint
 ```
