@@ -1,32 +1,77 @@
-## Function/Symbol: vector.Normalize
+# vector.Normalize() - Performance & Safety Patterns
 
-> Normalize a vector in-place (makes length = 1)
+## Recommended Approaches (Ranked by Use Case)
 
-### Required Context
-
-- Parameters: vec (Vector3 or {x,y,z})
-- Modifies the vector directly
-
-### Curated Usage Examples
-
-#### Normalize direction
+### **Fastest Method** (For hot loops, CreateMove)
 
 ```lua
-local dir = { x = 10, y = 0, z = 5 }
-vector.Normalize(dir)
--- dir is now unit length
+return vector.Divide(vec, vec:Length())
 ```
 
-#### Use on Vector3
+- Direct library call
+- No intermediate variable allocation
+- Best for per-frame operations
+
+### **Best Immutable Method** (Most readable & safe)
 
 ```lua
-local v = Vector3(100, 50, 0)
-vector.Normalize(v)
--- v now has length 1
+local function normalize_vector(vec)
+    return vec / vec:Length()
+end
 ```
 
-### Notes
+- Zero-length safe when wrapped with check (see below)
+- Cleaner syntax, returns new vector
+- Preferred for non-critical paths
 
-- In-place: no return value; pass by reference
-- Engine handles zero-length safely, but avoid for logic that needs direction
-- For non-mutating, use `vec / vec:Length()` pattern
+### **Manual Implementation** (When library unavailable)
+
+```lua
+local function Normalize(vec)
+    local length = math.sqrt(vec.x * vec.x + vec.y * vec.y + vec.z * vec.z)
+    return Vector3(vec.x / length, vec.y / length, vec.z / length)
+end
+```
+
+- Pure Lua, no dependencies
+- **WARNING**: Fails silently if `length == 0`
+
+## Safe Normalization Pattern (Recommended)
+
+```lua
+local function normalize_safe(direction)
+    local direction_length = direction:Length()
+
+    -- CRITICAL: Check for zero-length vector
+    if direction_length == 0 then
+        return nil  -- or return default direction like Vector3(1, 0, 0)
+    end
+
+    return direction / direction_length
+end
+```
+
+## Common Use Cases from Processing Zone
+
+```lua
+-- Building perpendicular vector from normalized direction
+local normalized_direction = normalize_safe(target_direction)
+if normalized_direction then
+    local perpendicular = Vector3(
+        normalized_direction.y,
+        -normalized_direction.x,
+        0
+    ) * radius
+end
+
+-- Angle + velocity combination
+local time_to_target = direction:Length() / projectile_speed
+local normalized = direction / direction:Length()
+local vel = angles:Forward() * normalized:Length()
+```
+
+## Performance Note
+
+- `vector:Length()` is O(sqrt(x² + y² + z²)) — call once and cache
+- Use `direction:LengthSqr()` for distance **comparisons only** (avoids sqrt)
+- Example: `if (pos1 - pos2):LengthSqr() < 10000 then` instead of `< 100`

@@ -38,26 +38,26 @@ function vector.Multiply(vec, scalar) end
 ---@nodiscard
 function vector.Divide(vec, scalar) end
 
----Get vector length.
+---Get vector length (magnitude).
 ---@param vec Vector3|ArrayVector
----@return integer
+---@return number
 ---@nodiscard
 function vector.Length(vec) end
 
----Get vector squared length.
+---Get vector squared length (magnitude²). Use this for distance comparisons to avoid sqrt.
 ---@param vec Vector3|ArrayVector
----@return integer
+---@return number
 ---@nodiscard
 function vector.LengthSqr(vec) end
 
----Get distance between two vectors.
+---Get Euclidean distance between two vectors (3D).
 ---@param a Vector3|ArrayVector
 ---@param b Vector3|ArrayVector
----@return integer
+---@return number
 ---@nodiscard
 function vector.Distance(a, b) end
 
----Normalize vector in place; modifies the vector directly without returning it.
+---Normalize vector in place (mutates original). Prefer `vec / vec:Length()` for immutable normalization.
 ---@param vec Vector3|ArrayVector
 function vector.Normalize(vec) end
 
