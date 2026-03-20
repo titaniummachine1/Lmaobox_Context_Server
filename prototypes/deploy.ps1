@@ -5,7 +5,7 @@ param(
     [string]$FilePath
 )
 
-$TargetDir = "C:\Users\Terminatort8000\AppData\Local\lua"
+$TargetDir = Join-Path $env:LOCALAPPDATA "lua"
 
 # If no file specified, deploy all .lua files in prototypes
 if (-not $FilePath) {

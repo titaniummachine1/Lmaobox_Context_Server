@@ -11,8 +11,9 @@ from mcp_server.mcp_stdio import _run_bundle
 print("Testing timeout directly...", file=sys.stderr)
 
 try:
+    project_dir = str((Path(__file__).parent / "test_hang").resolve())
     result = _run_bundle({
-        "projectDir": r"c:\Users\Terminatort8000\Desktop\Lmaobox_Context_Server\test_hang"
+        "projectDir": project_dir
     })
     print(f"Result: {json.dumps(result, indent=2)}", file=sys.stderr)
 except Exception as e:

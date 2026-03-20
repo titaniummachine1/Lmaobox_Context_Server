@@ -3,7 +3,7 @@
 
 $ScriptDir = Split-Path -Parent $PSCommandPath
 $SourceDir = $ScriptDir
-$TargetDir = "C:\Users\Terminatort8000\AppData\Local\lua"
+$TargetDir = Join-Path $env:LOCALAPPDATA "lua"
 
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host "   Lmaobox Auto-Deploy Watcher" -ForegroundColor Cyan

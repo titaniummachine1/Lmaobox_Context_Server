@@ -90,6 +90,32 @@ irm https://raw.githubusercontent.com/titaniummachine1/Lmaobox_Context_Server/ma
 - `bundle(projectDir, entryFile?, bundleOutputDir?, deployDir?)`
 - `luacheck(filePath, checkBundle?)`
 
+## Recommended VS Code Extensions
+
+This repo now includes workspace recommendations in `.vscode/extensions.json`.
+When prompted by VS Code after clone, install recommended extensions to avoid missing tooling.
+
+- `golang.go` (Go language server, formatting, diagnostics)
+- `ms-python.python` + `ms-python.vscode-pylance` (Python env + type checking)
+- `sumneko.lua` (Lua language features)
+- `ms-vscode.powershell` (PowerShell scripts and debugging)
+- `emeraldwalk.runonsave` (auto-deploy prototypes on save)
+- `yzhang.markdown-all-in-one` (maintaining docs/smart context markdown)
+
+## Contributor First-Clone Checklist
+
+1. Run `powershell -ExecutionPolicy Bypass -File scripts/install.ps1`
+2. Install recommended extensions from `.vscode/extensions.json`
+3. Use the repo virtualenv Python for scripts: `./.venv/Scripts/python.exe ...`
+4. Use env-based paths (for example `%LOCALAPPDATA%\\lua`) and avoid hardcoded user paths in scripts/docs
+
+### Path Portability Policy
+
+- Do not commit `C:\Users\<name>\...` paths
+- Prefer `${workspaceFolder}` in VS Code settings/tasks
+- Prefer `$env:LOCALAPPDATA` in PowerShell and `Path(__file__)` / repo-relative paths in Python
+- Keep repo scripts runnable from any clone location
+
 ## Development Notes
 
 - `launch_mcp.py` auto-runs Lua setup so first launch is usually zero-touch.

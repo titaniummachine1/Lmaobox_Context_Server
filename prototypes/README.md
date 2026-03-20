@@ -20,7 +20,7 @@ Uses "Run on Save" VSCode extension - saves and deploys automatically!
 Files deploy to:
 
 ```
-C:\Users\Terminatort8000\AppData\Local\lua\
+%LOCALAPPDATA%\lua\
 ```
 
 ### Manual Deploy (Optional)
