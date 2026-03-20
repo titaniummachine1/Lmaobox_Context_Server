@@ -16,13 +16,6 @@ Remote one-liner bootstrap:
 irm https://raw.githubusercontent.com/titaniummachine1/Lmaobox_Context_Server/main/scripts/install.ps1 | iex
 ```
 
-What install does:
-
-1. Ensures Lua 5.4+ is available (auto-installs to `automations/bin/lua/` when needed).
-2. Installs Node dependencies for bundling/crawler automation.
-3. Pulls the upstream docs repository (`https://github.com/lbox-src/docs`) into `data/upstream_docs/lbox-src-docs/`.
-4. Leaves website crawl refresh optional (`-RunWebRefresh`) so startup stays fast.
-
 ## MCP Setup (VS Code / Cursor / Claude)
 
 **Easy setup for AI or manual install:**
@@ -39,6 +32,7 @@ What install does:
 ```
 
 **After running one of the above:**
+
 1. Restart your editor (VS Code / Cursor)
 2. You should see "lmaobox-context" MCP server in the status bar at the bottom
 
@@ -73,18 +67,17 @@ What install does:
 }
 ```
 
-## New Here? Start With These Paths
+## Source Of Truth
 
-- MCP stdio entrypoint: `launch_mcp.py`
-- MCP tool protocol implementation: `src/mcp_server/mcp_stdio.py`
-- HTTP/API logic + symbol lookup: `src/mcp_server/server.py`
-- Smart context content: `data/smart_context/README.md`
-- Generated types used by `get_types`: `types/lmaobox_lua_api/`
-- Bundler and docs automation: `automations/`
+- Python stdio entrypoint: `launch_mcp.py`
+- Python MCP tool implementation: `src/mcp_server/mcp_stdio.py`
+- Python HTTP/type lookup logic: `src/mcp_server/server.py`
+- Native Go MCP implementation: `main.go`
+- Bundling automation: `automations/bundle-and-deploy.js`
 
 ## Smart Context Rules
 
-- Layout mirrors `types/lmaobox_lua_api/` under `data/smart_context/lmaobox_lua_api/`.
+- Layout mirrors `types/lmaobox_lua_api/` under `smart_context/lmaobox_lua_api/`.
 - Smart files are additive only (extra tips/examples).
 - `get_smart_context` always includes base type context from `get_types`.
 - If no additive smart file exists, `get_smart_context` falls back to type-derived context automatically.
@@ -93,37 +86,14 @@ What install does:
 
 - `get_types(symbol)`
 - `get_smart_context(symbol)`
+- `smart_search(query, limit?, searchWindow?, includeExamples?)`
 - `bundle(projectDir, entryFile?, bundleOutputDir?, deployDir?)`
 - `luacheck(filePath, checkBundle?)`
-
-## Docs Update Flow
-
-Install-time default:
-
-- `scripts/fetch-upstream-docs.ps1` syncs `https://github.com/lbox-src/docs` into `data/upstream_docs/lbox-src-docs/`
-
-Manual refresh options:
-
-- Upstream docs repo only:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/fetch-upstream-docs.ps1
-```
-
-- Website crawl + type regeneration:
-
-```powershell
-node automations/refresh-docs.js
-```
 
 ## Development Notes
 
 - `launch_mcp.py` auto-runs Lua setup so first launch is usually zero-touch.
+- Prefer the Python launcher for source-based development.
 - For HTTP mode: `python -m src.mcp_server.server` (default `127.0.0.1:8765`).
 - Health endpoint: `/health`
 - Sample test script: `scripts/test-get-types.ps1`
-
-## Extra Navigation
-
-- Architecture map: `docs/ARCHITECTURE.md`
-- Install and operations guide: `docs/INSTALL_AND_OPERATIONS.md`

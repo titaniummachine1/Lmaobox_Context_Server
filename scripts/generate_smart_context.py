@@ -430,7 +430,7 @@ Generated templates: {func_count + method_count} total
 2. Open the generated template in `processing_zone/01_TO_PROCESS/generated_templates/`
 3. Replace TODOs with real examples
 4. Test the code in-game
-5. Move to `data/smart_context/` when done
+5. Move to `smart_context/` when done
 6. Delete the template
 
 ## Templates Location
@@ -449,7 +449,7 @@ processing_zone/01_TO_PROCESS/generated_templates/
 python scripts/query_examples.py --symbol "engine.TraceLine"
 
 # Move completed file
-move processing_zone/01_TO_PROCESS/generated_templates/libraries/engine/TraceLine.md data/smart_context/engine/
+move processing_zone/01_TO_PROCESS/generated_templates/libraries/engine/TraceLine.md smart_context/engine/
 
 # Check MCP server
 curl http://localhost:8765/health
