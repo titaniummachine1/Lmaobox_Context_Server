@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -90,10 +89,10 @@ func main() {
 	// Add get_types tool
 	getTypesTool := mcp.NewTool(
 		"get_types",
-		mcp.WithDescription("Get type information for a Lmaobox Lua API symbol"),
+		mcp.WithDescription("Look up Lmaobox Lua API function signature, parameters, return types and required constants for an exact symbol name. Use this when you already know the symbol (e.g. 'engine.TraceLine', 'draw.Color'). If not found, returns did_you_mean suggestions. For unknown symbols use smart_search first."),
 		mcp.WithString("symbol",
 			mcp.Required(),
-			mcp.Description("Symbol name (e.g., 'Draw', 'render.text')"),
+			mcp.Description("Exact Lmaobox API symbol name. Use dot notation for namespaced symbols: 'engine.TraceLine', 'draw.Color', 'Entity.GetHealth', 'E_TFCond'. Case-sensitive for best results."),
 		),
 	)
 
@@ -102,10 +101,10 @@ func main() {
 	// Add get_smart_context tool
 	getSmartContextTool := mcp.NewTool(
 		"get_smart_context",
-		mcp.WithDescription("Get curated smart context for a symbol"),
+		mcp.WithDescription("Get full usage documentation for a Lmaobox Lua API symbol: signature, description, parameters, return values, code examples and usage patterns. Always call this BEFORE writing any API call to understand correct usage, parameter types and gotchas. Returns richer info than get_types. If symbol is unknown, use smart_search first, then call this with the exact match."),
 		mcp.WithString("symbol",
 			mcp.Required(),
-			mcp.Description("Symbol name"),
+			mcp.Description("Exact Lmaobox API symbol name. Use dot notation: 'engine.TraceLine', 'draw.Color', 'callbacks.CreateMove'. get_smart_context will also try fuzzy fallbacks."),
 		),
 	)
 
@@ -114,13 +113,13 @@ func main() {
 	// Add smart_search tool
 	smartSearchTool := mcp.NewTool(
 		"smart_search",
-		mcp.WithDescription("Search Lmaobox Lua API symbols, functions, and descriptions with fuzzy ranking. Useful when exact symbol is unknown or you want to discover related API."),
+		mcp.WithDescription("Fuzzy-search the Lmaobox Lua API when you don't know the exact symbol name. Returns ranked symbols with kind (function/constant/class), section (library/class/constants), description and signature. Use this to: (1) discover API when unsure of name, (2) recover from misspellings, (3) explore what's available for a topic. After finding matches, use get_smart_context with the exact symbol for full docs."),
 		mcp.WithString("query",
 			mcp.Required(),
-			mcp.Description("Search text (e.g., 'trace line', 'draw text', 'player health', 'get velocity')"),
+			mcp.Description("Natural language or partial name search. Examples: 'player health', 'trace line', 'draw text', 'get velocity', 'local player', 'shoot'. Fuzzy matching handles typos."),
 		),
 		mcp.WithNumber("limit",
-			mcp.Description("Max results to return (1-50). Default 20."),
+			mcp.Description("Max results to return (1-50). Default 15."),
 		),
 	)
 
@@ -236,10 +235,17 @@ func handleGetTypes(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 	}
 
 	if typeInfo == "" {
-		return mcp.NewToolResultText(fmt.Sprintf("No type definition found for '%s'\n\nSuggestions:\n- Check spelling and capitalization\n- Try searching for parent module (e.g., 'draw' instead of 'draw.Color')\n- Use get_smart_context for usage examples", symbol)), nil
+		return mcp.NewToolResultText(fmt.Sprintf(
+			"## get_types: No definition found for `%s`\n\n"+
+				"**Suggestions:**\n"+
+				"- Check spelling/capitalization (`engine.TraceLine` not `Engine.Traceline`)\n"+
+				"- Try the parent namespace (e.g. `draw` instead of `draw.Color`)\n"+
+				"- Use `smart_search` with a keyword to find the correct name\n"+
+				"- Use `get_smart_context` if you want examples and usage patterns",
+			symbol)), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf("Type definition for '%s':\n\n%s", symbol, typeInfo)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("## get_types: `%s`\n\n%s", symbol, typeInfo)), nil
 }
 
 func handleGetSmartContext(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -255,10 +261,24 @@ func handleGetSmartContext(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	}
 
 	if contextInfo == "" {
-		return mcp.NewToolResultText(fmt.Sprintf("No smart context found for '%s'\n\nSuggestions:\n- Check spelling and try variations (e.g., 'draw.Color', 'Color', 'draw')\n- Use get_types for type definitions\n- Try searching for related symbols", symbol)), nil
+		// Try to fall back to type definition
+		typeInfo, _ := findTypeDefinition(symbol)
+		if typeInfo != "" {
+			return mcp.NewToolResultText(fmt.Sprintf(
+				"## get_smart_context: `%s` (types fallback)\n\nNo curated context file found, but type definition is available:\n\n%s\n\n"+
+					"---\n**Tip:** Use `smart_search` with keywords to find the exact symbol name.",
+				symbol, typeInfo)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf(
+			"## get_smart_context: Not found for `%s`\n\n"+
+				"**Try:**\n"+
+				"- Variations: `draw.Color`, `Color`, `draw`\n"+
+				"- `smart_search` with a keyword to discover the correct name\n"+
+				"- `get_types` for raw type signatures",
+			symbol)), nil
 	}
 
-	return mcp.NewToolResultText(contextInfo), nil
+	return mcp.NewToolResultText(fmt.Sprintf("## get_smart_context: `%s`\n\n%s", symbol, contextInfo)), nil
 }
 
 // Native Go bundling functions
@@ -766,7 +786,7 @@ func handleSmartSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 		return mcp.NewToolResultError("query is required"), nil
 	}
 
-	limit := 20
+	limit := 15
 	if rawLimit, ok := req.Params.Arguments["limit"].(float64); ok {
 		limit = int(rawLimit)
 		if limit < 1 {
@@ -782,21 +802,103 @@ func handleSmartSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 		return mcp.NewToolResultError(fmt.Sprintf("Search failed: %v", err)), nil
 	}
 
-	payload := map[string]interface{}{
-		"query":    query,
-		"returned": len(results),
-		"limit":    limit,
-		"results":  results,
-	}
+	output := formatSearchResultsMarkdown(query, results, limit)
+	return mcp.NewToolResultText(output), nil
+}
+
+func formatSearchResultsMarkdown(query string, results []SmartSearchResult, limit int) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("## smart_search: `%s`\n", query))
+	sb.WriteString(fmt.Sprintf("_Returned %d of up to %d results_\n\n", len(results), limit))
+
 	if len(results) == 0 {
-		payload["hint"] = "No matches found. Try broader terms or check spelling."
+		sb.WriteString("No matches found. Try broader terms or check spelling.\n")
+		sb.WriteString("\n**Tip:** Use `smart_search` with simpler keywords, e.g. `health`, `trace`, `draw`")
+		return sb.String()
 	}
 
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return mcp.NewToolResultError("Failed to encode results"), nil
+	// Group by section for hierarchy clarity
+	sectionOrder := []string{"library", "class", "entity_props", "constants", "symbol"}
+	bySection := make(map[string][]SmartSearchResult)
+	for _, r := range results {
+		sec := r.Section
+		if sec == "" {
+			sec = "symbol"
+		}
+		bySection[sec] = append(bySection[sec], r)
 	}
-	return mcp.NewToolResultText(string(encoded)), nil
+
+	// Add any sections not in the fixed order
+	known := make(map[string]bool)
+	for _, s := range sectionOrder {
+		known[s] = true
+	}
+	for sec := range bySection {
+		if !known[sec] {
+			sectionOrder = append(sectionOrder, sec)
+		}
+	}
+
+	for _, sec := range sectionOrder {
+		rows, ok := bySection[sec]
+		if !ok || len(rows) == 0 {
+			continue
+		}
+
+		sectionLabel := sectionDisplayName(sec)
+		sb.WriteString(fmt.Sprintf("### %s\n", sectionLabel))
+		sb.WriteString("| Symbol | Kind | Description | Signature |\n")
+		sb.WriteString("|---|---|---|---|\n")
+
+		for _, r := range rows {
+			desc := r.Description
+			if len(desc) > 80 {
+				desc = desc[:77] + "..."
+			}
+			sig := r.Signature
+			if len(sig) > 60 {
+				sig = sig[:57] + "..."
+			}
+			// Escape pipe chars in cells
+			desc = strings.ReplaceAll(desc, "|", `\|`)
+			sig = strings.ReplaceAll(sig, "|", `\|`)
+			sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | %s |\n",
+				r.Symbol, r.Kind, desc, sig))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Suggest next steps based on top result
+	if len(results) > 0 {
+		top := results[0]
+		sb.WriteString("---\n")
+		sb.WriteString("**Next steps:**\n")
+		sb.WriteString(fmt.Sprintf("- Full docs & examples: `get_smart_context(\"%s\")` \n", top.Symbol))
+		sb.WriteString(fmt.Sprintf("- Type signature only: `get_types(\"%s\")` \n", top.Symbol))
+		if len(results) > 1 {
+			sb.WriteString(fmt.Sprintf("- More results: re-run `smart_search` with `limit` > %d\n", limit))
+		}
+	}
+
+	return sb.String()
+}
+
+func sectionDisplayName(section string) string {
+	switch section {
+	case "library":
+		return "Library Functions (e.g. engine.*, draw.*, entities.*)"
+	case "class":
+		return "Class Methods (e.g. Entity.*, Trace.*)"
+	case "entity_props":
+		return "Entity Properties"
+	case "constants":
+		return "Constants / Enums"
+	case "symbol":
+		return "Other Symbols"
+	default:
+		return strings.Title(section)
+	}
 }
 
 func smartSearch(query string, limit int) ([]SmartSearchResult, error) {
