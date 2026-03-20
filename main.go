@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -108,6 +110,21 @@ func main() {
 	)
 
 	s.AddTool(getSmartContextTool, handleGetSmartContext)
+
+	// Add smart_search tool
+	smartSearchTool := mcp.NewTool(
+		"smart_search",
+		mcp.WithDescription("Search Lmaobox Lua API symbols, functions, and descriptions with fuzzy ranking. Useful when exact symbol is unknown or you want to discover related API."),
+		mcp.WithString("query",
+			mcp.Required(),
+			mcp.Description("Search text (e.g., 'trace line', 'draw text', 'player health', 'get velocity')"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Max results to return (1-50). Default 20."),
+		),
+	)
+
+	s.AddTool(smartSearchTool, handleSmartSearch)
 
 	// Start server
 	if err := server.ServeStdio(s); err != nil {
@@ -726,6 +743,242 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// ── smart_search ────────────────────────────────────────────────────────────
+
+type SmartSearchResult struct {
+	Symbol      string  `json:"symbol"`
+	Kind        string  `json:"kind"`
+	Section     string  `json:"section"`
+	Score       float64 `json:"score"`
+	Description string  `json:"description,omitempty"`
+	Signature   string  `json:"signature,omitempty"`
+}
+
+type smartCandidate struct {
+	SmartSearchResult
+	combinedLower string
+}
+
+func handleSmartSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	query, ok := req.Params.Arguments["query"].(string)
+	if !ok || strings.TrimSpace(query) == "" {
+		return mcp.NewToolResultError("query is required"), nil
+	}
+
+	limit := 20
+	if rawLimit, ok := req.Params.Arguments["limit"].(float64); ok {
+		limit = int(rawLimit)
+		if limit < 1 {
+			limit = 1
+		}
+		if limit > 50 {
+			limit = 50
+		}
+	}
+
+	results, err := smartSearch(query, limit)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Search failed: %v", err)), nil
+	}
+
+	payload := map[string]interface{}{
+		"query":    query,
+		"returned": len(results),
+		"limit":    limit,
+		"results":  results,
+	}
+	if len(results) == 0 {
+		payload["hint"] = "No matches found. Try broader terms or check spelling."
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return mcp.NewToolResultError("Failed to encode results"), nil
+	}
+	return mcp.NewToolResultText(string(encoded)), nil
+}
+
+func smartSearch(query string, limit int) ([]SmartSearchResult, error) {
+	queryLower := strings.ToLower(strings.TrimSpace(query))
+
+	execDir := filepath.Dir(os.Args[0])
+	typesDir := filepath.Join(execDir, "types", "lmaobox_lua_api")
+
+	var candidates []smartCandidate
+
+	_ = filepath.WalkDir(typesDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".d.lua") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		entries := parseDLuaEntries(path, string(content))
+		candidates = append(candidates, entries...)
+		return nil
+	})
+
+	tokens := strings.Fields(queryLower)
+	var scored []smartCandidate
+	for _, c := range candidates {
+		c.Score = scoreSmartCandidate(queryLower, tokens, c.combinedLower, strings.ToLower(c.Symbol))
+		if c.Score > 0 {
+			scored = append(scored, c)
+		}
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].Score > scored[j].Score
+	})
+
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+
+	out := make([]SmartSearchResult, len(scored))
+	for i, c := range scored {
+		out[i] = c.SmartSearchResult
+	}
+	return out, nil
+}
+
+func parseDLuaEntries(filePath, content string) []smartCandidate {
+	var results []smartCandidate
+
+	section := "symbol"
+	switch {
+	case strings.Contains(filePath, "Lua_Libraries"):
+		section = "library"
+	case strings.Contains(filePath, "Lua_Classes"):
+		section = "class"
+	case strings.Contains(filePath, "constants"):
+		section = "constants"
+	case strings.Contains(filePath, "entity_props"):
+		section = "entity_props"
+	}
+
+	funcRe := regexp.MustCompile(`^function\s+([\w.]+)\s*\(`)
+	constRe := regexp.MustCompile(`^([A-Z_][A-Z0-9_]{2,})\s*=`)
+
+	lines := strings.Split(content, "\n")
+	var commentBlock []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "---") {
+			cleaned := strings.TrimLeft(trimmed, "-")
+			cleaned = strings.TrimSpace(cleaned)
+			commentBlock = append(commentBlock, cleaned)
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "function ") {
+			sig := strings.TrimSuffix(trimmed, " end")
+
+			var symbolName string
+			if m := funcRe.FindStringSubmatch(trimmed); len(m) > 1 {
+				symbolName = m[1]
+			}
+
+			desc := buildDesc(commentBlock)
+
+			if symbolName != "" {
+				combined := strings.ToLower(symbolName + " " + desc + " " + sig)
+				results = append(results, smartCandidate{
+					SmartSearchResult: SmartSearchResult{
+						Symbol:      symbolName,
+						Kind:        "function",
+						Section:     section,
+						Description: desc,
+						Signature:   sig,
+					},
+					combinedLower: combined,
+				})
+			}
+			commentBlock = commentBlock[:0]
+			continue
+		}
+
+		if m := constRe.FindStringSubmatch(trimmed); len(m) > 1 {
+			name := m[1]
+			desc := buildDesc(commentBlock)
+			combined := strings.ToLower(name + " " + desc)
+			results = append(results, smartCandidate{
+				SmartSearchResult: SmartSearchResult{
+					Symbol:      name,
+					Kind:        "constant",
+					Section:     section,
+					Description: desc,
+				},
+				combinedLower: combined,
+			})
+			commentBlock = commentBlock[:0]
+			continue
+		}
+
+		if trimmed != "" && !strings.HasPrefix(trimmed, "--") {
+			commentBlock = commentBlock[:0]
+		}
+	}
+
+	return results
+}
+
+func buildDesc(commentBlock []string) string {
+	var parts []string
+	for _, c := range commentBlock {
+		if !strings.HasPrefix(c, "@") && c != "" {
+			parts = append(parts, c)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func scoreSmartCandidate(queryLower string, tokens []string, combinedLower, symbolLower string) float64 {
+	score := 0.0
+
+	if symbolLower == queryLower {
+		score += 120
+	}
+	if queryLower != "" && strings.HasPrefix(symbolLower, queryLower) {
+		score += 80
+	}
+	if queryLower != "" && strings.Contains(symbolLower, queryLower) {
+		score += 60
+	}
+
+	for _, token := range tokens {
+		if strings.Contains(symbolLower, token) {
+			score += 30
+		} else if strings.Contains(combinedLower, token) {
+			score += 15
+		}
+	}
+
+	if len(tokens) > 0 {
+		hits := 0
+		for _, t := range tokens {
+			if strings.Contains(combinedLower, t) {
+				hits++
+			}
+		}
+		coverage := float64(hits) / float64(len(tokens))
+		score += 20 * coverage
+	}
+
+	return score
+}
+
+// ── end smart_search ─────────────────────────────────────────────────────────
 
 func findLuac() string {
 	candidates := []string{
