@@ -1,3 +1,4 @@
-*.lua linguist-documentation
+*.lua linguist-vendored
+*.d.lua linguist-generated
 *.json linguist-generated
 tests/ linguist-vendored
