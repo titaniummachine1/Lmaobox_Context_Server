@@ -759,6 +759,17 @@ func findExistingRepoPath(parts ...string) string {
 	return filepath.Join(parts...)
 }
 
+func resolveSmartContextRoot() string {
+	preferred := findExistingRepoPath("smart_context")
+	preferredAPI := filepath.Join(preferred, "lmaobox_lua_api")
+	if info, err := os.Stat(preferredAPI); err == nil && info.IsDir() {
+		return preferred
+	}
+
+	legacy := findExistingRepoPath("data", "smart_context")
+	return legacy
+}
+
 func extractTypeSignature(lines []string, symbol string) (string, int) {
 	shortSymbol := symbol
 	if dot := strings.LastIndex(symbol, "."); dot >= 0 {
@@ -1056,7 +1067,7 @@ func smartContextCandidatePaths(symbol string) []string {
 		return nil
 	}
 
-	smartRoot := findExistingRepoPath("data", "smart_context")
+	smartRoot := resolveSmartContextRoot()
 	mirrorRoot := filepath.Join(smartRoot, "lmaobox_lua_api")
 	parts := strings.Split(normalized, ".")
 	paths := make([]string, 0)
@@ -1211,7 +1222,7 @@ func findSmartContext(symbol string) (string, error) {
 		return "", typeErr
 	}
 
-	apiRoot := findExistingRepoPath("data", "smart_context", "lmaobox_lua_api")
+	apiRoot := filepath.Join(resolveSmartContextRoot(), "lmaobox_lua_api")
 	foundContent, err := findBestSmartContextMatch(apiRoot, symbol)
 	if err != nil {
 		return "", err

@@ -4,7 +4,9 @@ from pathlib import Path
 # Project roots
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT_DIR / "data"
-SMART_CONTEXT_DIR = DATA_DIR / "smart_context"
+PREFERRED_SMART_CONTEXT_DIR = ROOT_DIR / "smart_context"
+LEGACY_SMART_CONTEXT_DIR = DATA_DIR / "smart_context"
+SMART_CONTEXT_DIR = PREFERRED_SMART_CONTEXT_DIR if (PREFERRED_SMART_CONTEXT_DIR / "lmaobox_lua_api").exists() else LEGACY_SMART_CONTEXT_DIR
 TYPES_DIR = ROOT_DIR / "types"
 
 # Runtime configuration
