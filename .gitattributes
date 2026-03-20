@@ -1,0 +1,3 @@
+*.lua linguist-documentation
+*.json linguist-generated
+tests/ linguist-vendored
