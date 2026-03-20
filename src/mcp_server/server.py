@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 import difflib
 import re
+from collections import defaultdict
 
 from .config import (
     DB_PATH,
@@ -19,6 +20,328 @@ from .config import (
 )
 
 LOG = logging.getLogger("mcp_server")
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _normalize_text(value: str | None) -> str:
+    if not value:
+        return ""
+    return value.strip().lower()
+
+
+def _make_snippet(text: str, query: str, max_len: int = 220) -> str:
+    clean = " ".join((text or "").split())
+    if not clean:
+        return ""
+    if len(clean) <= max_len:
+        return clean
+
+    query_norm = _normalize_text(query)
+    clean_norm = clean.lower()
+    idx = clean_norm.find(query_norm) if query_norm else -1
+    if idx < 0:
+        return clean[:max_len].rstrip() + "..."
+
+    half = max_len // 2
+    start = max(0, idx - half)
+    end = min(len(clean), start + max_len)
+    if start > 0:
+        start += clean[start:].find(" ") + 1 if " " in clean[start:] else 0
+    snippet = clean[start:end].strip()
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(clean):
+        snippet = snippet + "..."
+    return snippet
+
+
+def _score_candidate(query: str, candidate: dict) -> float:
+    query_norm = _normalize_text(query)
+    tokens = [tok for tok in re.split(r"\s+", query_norm) if tok]
+
+    symbol = _normalize_text(candidate.get("symbol"))
+    title = _normalize_text(candidate.get("title"))
+    description = _normalize_text(candidate.get("description"))
+    summary = _normalize_text(candidate.get("summary"))
+    signature = _normalize_text(candidate.get("signature"))
+    content = _normalize_text(candidate.get("content"))
+    kind = _normalize_text(candidate.get("kind"))
+
+    combined = " ".join(
+        part
+        for part in [symbol, title, description, summary, signature, content]
+        if part
+    )
+
+    score = 0.0
+    if symbol == query_norm:
+        score += 120
+    if symbol.startswith(query_norm) and query_norm:
+        score += 80
+    if query_norm and query_norm in symbol:
+        score += 60
+    if query_norm and query_norm in signature:
+        score += 35
+    if query_norm and query_norm in title:
+        score += 30
+    if query_norm and query_norm in description:
+        score += 25
+    if query_norm and query_norm in summary:
+        score += 20
+    if query_norm and query_norm in content:
+        score += 20
+
+    if query_norm and symbol:
+        score += difflib.SequenceMatcher(None, query_norm, symbol).ratio() * 40
+
+    token_hits = 0
+    for token in tokens:
+        if token in combined:
+            token_hits += 1
+    if token_hits:
+        coverage = token_hits / max(len(tokens), 1)
+        score += 20 * coverage
+
+    if kind in ("function", "library", "class"):
+        score += 6
+    elif kind == "constant":
+        score += 3
+    elif kind == "example":
+        score += 1
+
+    return round(score, 2)
+
+
+def smart_search(query: str, limit: int = 20, search_window: int = 300, include_examples: bool = True):
+    if not query or not query.strip():
+        raise ValueError("query is required")
+
+    limit = max(1, min(int(limit), 100))
+    search_window = max(limit, min(int(search_window), 5000))
+
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    candidates: list[dict] = []
+    query_like = f"%{query.strip()}%"
+
+    has_symbols = _table_exists(conn, "symbols")
+    has_docs = _table_exists(conn, "docs")
+    has_signatures = _table_exists(conn, "signatures")
+    has_constants = _table_exists(conn, "constants")
+    has_examples = _table_exists(conn, "examples")
+
+    if has_symbols:
+        if has_docs and has_signatures:
+            rows = conn.execute(
+                """
+                SELECT s.full_name, s.kind, s.path, s.page_url, s.title, s.description,
+                       d.summary, d.notes, g.signature, g.params_json, g.returns
+                FROM symbols s
+                LEFT JOIN docs d ON d.symbol_full_name = s.full_name
+                LEFT JOIN signatures g ON g.symbol_full_name = s.full_name
+                WHERE s.full_name LIKE ? OR s.title LIKE ? OR s.description LIKE ? OR d.summary LIKE ? OR g.signature LIKE ?
+                LIMIT ?
+                """,
+                (query_like, query_like, query_like, query_like, query_like, search_window),
+            ).fetchall()
+        elif has_docs:
+            rows = conn.execute(
+                """
+                SELECT s.full_name, s.kind, s.path, s.page_url, s.title, s.description,
+                       d.summary, d.notes, '' as signature, '' as params_json, '' as returns
+                FROM symbols s
+                LEFT JOIN docs d ON d.symbol_full_name = s.full_name
+                WHERE s.full_name LIKE ? OR s.title LIKE ? OR s.description LIKE ? OR d.summary LIKE ?
+                LIMIT ?
+                """,
+                (query_like, query_like, query_like, query_like, search_window),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT s.full_name, s.kind, s.path, s.page_url, s.title, s.description,
+                       '' as summary, '' as notes, '' as signature, '' as params_json, '' as returns
+                FROM symbols s
+                WHERE s.full_name LIKE ? OR s.title LIKE ? OR s.description LIKE ?
+                LIMIT ?
+                """,
+                (query_like, query_like, query_like, search_window),
+            ).fetchall()
+
+        for row in rows:
+            content_parts = [row["description"], row["summary"], row["notes"], row["signature"], row["params_json"], row["returns"]]
+            content = "\n".join(part for part in content_parts if part)
+            candidates.append(
+                {
+                    "symbol": row["full_name"],
+                    "kind": row["kind"] or "symbol",
+                    "path": row["path"],
+                    "source_url": row["page_url"],
+                    "title": row["title"],
+                    "description": row["description"],
+                    "summary": row["summary"],
+                    "signature": row["signature"],
+                    "content": content,
+                    "section": "symbol",
+                }
+            )
+
+        # Typo-tolerant fallback: when LIKE misses, scan symbol names with fuzzy ratio.
+        if len(candidates) < max(limit, 20):
+            fuzzy_rows = conn.execute(
+                """
+                SELECT full_name, kind, path, page_url, title, description
+                FROM symbols
+                LIMIT ?
+                """,
+                (search_window,),
+            ).fetchall()
+            query_norm = _normalize_text(query)
+            for row in fuzzy_rows:
+                full_name = row["full_name"] or ""
+                ratio = difflib.SequenceMatcher(None, query_norm, _normalize_text(full_name)).ratio()
+                if ratio < 0.45:
+                    continue
+                candidates.append(
+                    {
+                        "symbol": full_name,
+                        "kind": row["kind"] or "symbol",
+                        "path": row["path"],
+                        "source_url": row["page_url"],
+                        "title": row["title"],
+                        "description": row["description"],
+                        "summary": None,
+                        "signature": None,
+                        "content": row["description"] or "",
+                        "section": "symbol",
+                    }
+                )
+
+    if has_constants:
+        rows = conn.execute(
+            """
+            SELECT symbol_full_name, name, value, description, category
+            FROM constants
+            WHERE name LIKE ? OR description LIKE ? OR value LIKE ?
+            LIMIT ?
+            """,
+            (query_like, query_like, query_like, search_window),
+        ).fetchall()
+        for row in rows:
+            candidates.append(
+                {
+                    "symbol": row["symbol_full_name"] or row["name"],
+                    "kind": "constant",
+                    "path": None,
+                    "source_url": None,
+                    "title": row["name"],
+                    "description": row["description"],
+                    "summary": row["category"],
+                    "signature": None,
+                    "content": f"value={row['value'] or ''}",
+                    "section": "constants",
+                }
+            )
+
+    if include_examples and has_examples:
+        rows = conn.execute(
+            """
+            SELECT symbol_full_name, example_text, source_url
+            FROM examples
+            WHERE example_text LIKE ? OR symbol_full_name LIKE ?
+            LIMIT ?
+            """,
+            (query_like, query_like, search_window),
+        ).fetchall()
+        for row in rows:
+            candidates.append(
+                {
+                    "symbol": row["symbol_full_name"],
+                    "kind": "example",
+                    "path": None,
+                    "source_url": row["source_url"],
+                    "title": row["symbol_full_name"],
+                    "description": None,
+                    "summary": None,
+                    "signature": None,
+                    "content": row["example_text"],
+                    "section": "examples",
+                }
+            )
+
+    conn.close()
+
+    if not candidates:
+        return {
+            "query": query,
+            "total_candidates": 0,
+            "returned": 0,
+            "limit": limit,
+            "search_window": search_window,
+            "results": [],
+            "hint": "No matches found. Try a broader query, alternate spelling, or increase search_window.",
+        }
+
+    best_by_symbol: dict[str, dict] = {}
+    for candidate in candidates:
+        key = f"{candidate.get('section')}::{candidate.get('symbol') or candidate.get('title') or '<unknown>'}"
+        candidate["score"] = _score_candidate(query, candidate)
+        existing = best_by_symbol.get(key)
+        if not existing:
+            candidate["occurrences"] = 1
+            best_by_symbol[key] = candidate
+            continue
+
+        existing["occurrences"] = int(existing.get("occurrences", 1)) + 1
+        if candidate["score"] > existing["score"]:
+            candidate["occurrences"] = existing["occurrences"]
+            best_by_symbol[key] = candidate
+
+    ranked = sorted(best_by_symbol.values(), key=lambda item: item["score"], reverse=True)
+    top = ranked[:limit]
+
+    section_counts: dict[str, int] = defaultdict(int)
+    for row in top:
+        section_counts[row.get("section") or "other"] += 1
+
+    results = []
+    for row in top:
+        snippet_source = row.get("content") or row.get("description") or row.get("summary") or row.get("title") or ""
+        results.append(
+            {
+                "symbol": row.get("symbol"),
+                "kind": row.get("kind"),
+                "section": row.get("section"),
+                "score": row.get("score"),
+                "title": row.get("title"),
+                "description": row.get("description"),
+                "signature": row.get("signature"),
+                "snippet": _make_snippet(str(snippet_source), query),
+                "occurrences": int(row.get("occurrences", 1)),
+                "path": row.get("path"),
+                "source_url": row.get("source_url"),
+            }
+        )
+
+    return {
+        "query": query,
+        "total_candidates": len(ranked),
+        "returned": len(results),
+        "limit": limit,
+        "search_window": search_window,
+        "section_counts": dict(section_counts),
+        "results": results,
+        "hint": "Increase limit/search_window for broader recall. Reduce include_examples for tighter results.",
+    }
 
 
 def _ensure_db(conn: sqlite3.Connection) -> None:
@@ -507,7 +830,11 @@ def _smart_context_candidates(symbol: str):
         yield mirror_root / "constants" / leaf
         yield mirror_root / "entity_props" / leaf
 
-    # Legacy support: keep old lookups working while migrating files.
+    yield from _deprecated_smart_context_candidates(normalized)
+
+
+def _deprecated_smart_context_candidates(normalized: str):
+    """Deprecated fallback for pre-mirror smart context paths."""
     yield SMART_CONTEXT_DIR / (normalized + ".md")
 
     segments = normalized.split(".")
@@ -582,6 +909,58 @@ def _combine_base_and_additional(base_text: str | None, additional_text: str | N
     return base_text or ""
 
 
+def _best_smart_context_match(symbol: str) -> Path | None:
+    normalized = symbol.strip().replace("::", ".").replace("/", ".").lower()
+    if not normalized:
+        return None
+
+    root = SMART_CONTEXT_DIR / "lmaobox_lua_api"
+    if not root.exists():
+        root = SMART_CONTEXT_DIR
+
+    parts = normalized.split(".")
+    leaf = parts[-1]
+    joined = "/".join(parts)
+
+    best_score = -1
+    best_path: Path | None = None
+
+    for path in root.rglob("*.md"):
+        try:
+            rel = path.relative_to(root).as_posix().lower()
+        except Exception:
+            continue
+
+        base = path.stem.lower()
+        parent = path.parent.name.lower()
+
+        score = 0
+
+        # Highest confidence: exact symbol index.md (e.g. Lua_Classes/Trace/index.md)
+        if base == "index" and parent == leaf:
+            score += 120
+
+        # Exact leaf filename (e.g. engine/TraceLine.md)
+        if base == leaf:
+            score += 100
+
+        # Full path shape match
+        if rel == f"{joined}.md" or rel.endswith(f"/{joined}.md"):
+            score += 90
+        if rel.endswith(f"/{joined}/index.md"):
+            score += 90
+
+        # Weak fallback containment
+        if leaf in rel:
+            score += 15
+
+        if score > best_score:
+            best_score = score
+            best_path = path
+
+    return best_path if best_score > 0 else None
+
+
 def get_smart_context(symbol: str):
     if not symbol:
         raise ValueError("symbol is required")
@@ -602,10 +981,8 @@ def get_smart_context(symbol: str):
             except Exception:
                 continue  # try next candidate
 
-    normalized = symbol.strip().replace("::", ".").replace("/", ".")
-    partial_hits = list(SMART_CONTEXT_DIR.rglob(f"*{normalized}*.md"))
-    if partial_hits:
-        target = partial_hits[0]
+    target = _best_smart_context_match(symbol)
+    if target:
         try:
             additional = target.read_text(encoding=DEFAULT_ENCODING)
             merged_content = _combine_base_and_additional(base_text, additional)
@@ -716,6 +1093,28 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                     self._json(404, {"error": "context not found"})
             except Exception as exc:
                 LOG.exception("get_smart_context failed")
+                self._json(500, {"error": str(exc)})
+            return
+
+        if path == "/smart_search":
+            query_text = (query.get("query") or [""])[0]
+            limit_raw = (query.get("limit") or ["20"])[0]
+            window_raw = (query.get("search_window") or ["300"])[0]
+            include_examples_raw = (query.get("include_examples") or ["true"])[0]
+
+            if not query_text:
+                self._json(400, {"error": "query parameter is required"})
+                return
+            try:
+                payload = smart_search(
+                    query=query_text,
+                    limit=int(limit_raw),
+                    search_window=int(window_raw),
+                    include_examples=str(include_examples_raw).lower() != "false",
+                )
+                self._json(200, payload)
+            except Exception as exc:
+                LOG.exception("smart_search failed")
                 self._json(500, {"error": str(exc)})
             return
 
