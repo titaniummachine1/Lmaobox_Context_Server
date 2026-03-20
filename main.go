@@ -1129,54 +1129,94 @@ func combineTypeAndSmartContext(typeInfo string, additional string) string {
 	return typeInfo
 }
 
-func findSmartContext(symbol string) (string, error) {
-	for _, candidate := range smartContextCandidatePaths(symbol) {
-		content, err := os.ReadFile(candidate)
-		if err != nil {
-			continue
-		}
-		typeInfo, typeErr := findTypeDefinition(symbol)
-		if typeErr != nil {
-			return "", typeErr
-		}
-		return combineTypeAndSmartContext(typeInfo, string(content)), nil
+func findBestSmartContextMatch(root string, symbol string) (string, error) {
+	normalized := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(symbol), "::", "."), "/", "."))
+	if normalized == "" {
+		return "", nil
 	}
 
-	smartContextDir := findExistingRepoPath("data", "smart_context")
-	normalized := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(symbol), "::", "."), "/", ".")
-	leaf := strings.ToLower(normalized)
-	if dot := strings.LastIndex(leaf, "."); dot >= 0 {
-		leaf = leaf[dot+1:]
-	}
+	parts := strings.Split(normalized, ".")
+	leaf := parts[len(parts)-1]
+	joined := strings.Join(parts, "/")
 
-	var foundContent string
-	// filepath.WalkDir returns nil (not SkipAll) when visitor returns SkipAll, so track via foundContent.
-	filepath.WalkDir(smartContextDir, func(path string, d fs.DirEntry, walkErr error) error { //nolint:errcheck
-		if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
+	bestScore := -1
+	bestPath := ""
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
 			return nil
 		}
-		fileName := strings.ToLower(strings.TrimSuffix(filepath.Base(path), ".md"))
-		// Exact filename match (e.g. ConfigPersistencePattern.md)
-		exactFileMatch := fileName == leaf
-		// index.md inside a matching directory (e.g. Lua_Classes/UserCmd/index.md)
-		isIndex := filepath.Base(path) == "index.md"
-		parentDirName := strings.ToLower(filepath.Base(filepath.Dir(path)))
-		exactDirIndex := isIndex && parentDirName == leaf
-		if exactFileMatch || exactDirIndex {
-			content, readErr := os.ReadFile(path)
-			if readErr == nil {
-				foundContent = string(content)
-				return filepath.SkipAll
-			}
+		if d.IsDir() || !strings.HasSuffix(strings.ToLower(path), ".md") {
+			return nil
+		}
+
+		relPath, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		rel := strings.ToLower(filepath.ToSlash(relPath))
+		base := strings.ToLower(strings.TrimSuffix(filepath.Base(path), ".md"))
+		parent := strings.ToLower(filepath.Base(filepath.Dir(path)))
+
+		score := 0
+
+		// Highest confidence: index.md directly in a symbol directory.
+		if base == "index" && parent == leaf {
+			score += 120
+		}
+
+		// Direct leaf filename match (e.g. GetRoundState.md).
+		if base == leaf {
+			score += 100
+		}
+
+		// Full symbol path structure match (e.g. engine/TraceLine.md or UserCmd/index.md).
+		if rel == joined+".md" || strings.HasSuffix(rel, "/"+joined+".md") {
+			score += 90
+		}
+		if strings.HasSuffix(rel, "/"+joined+"/index.md") {
+			score += 90
+		}
+
+		// Generic containment fallback for flexible discovery.
+		if strings.Contains(rel, leaf) {
+			score += 15
+		}
+
+		if score > bestScore {
+			bestScore = score
+			bestPath = path
 		}
 		return nil
 	})
+	if err != nil {
+		return "", err
+	}
 
+	if bestScore <= 0 || bestPath == "" {
+		return "", nil
+	}
+
+	content, readErr := os.ReadFile(bestPath)
+	if readErr != nil {
+		return "", readErr
+	}
+
+	return string(content), nil
+}
+
+func findSmartContext(symbol string) (string, error) {
+	typeInfo, typeErr := findTypeDefinition(symbol)
+	if typeErr != nil {
+		return "", typeErr
+	}
+
+	apiRoot := findExistingRepoPath("data", "smart_context", "lmaobox_lua_api")
+	foundContent, err := findBestSmartContextMatch(apiRoot, symbol)
+	if err != nil {
+		return "", err
+	}
 	if foundContent != "" {
-		typeInfo, typeErr := findTypeDefinition(symbol)
-		if typeErr != nil {
-			return "", typeErr
-		}
 		return combineTypeAndSmartContext(typeInfo, foundContent), nil
 	}
 
