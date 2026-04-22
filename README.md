@@ -119,6 +119,10 @@ For extra structure details, see `smart_context/README.md`.
 - `smart_search(query, limit?, searchWindow?, includeExamples?)`
 - `bundle(projectDir, entryFile?, bundleOutputDir?, deployDir?)`
 - `luacheck(filePath, checkBundle?)`
+  - Includes hard-fail Zero-Mutation callback policy checks in Go runtime:
+    - `callbacks.Register` and `callbacks.Unregister` must be at depth 0 (global scope)
+    - `callbacks.Unregister(event, id)` must appear before `callbacks.Register(event, id, fn)` (Kill-Switch)
+    - `callbacks.Unregister` is forbidden inside any function block, including unload handlers
 
 ## Recommended VS Code Extensions
 

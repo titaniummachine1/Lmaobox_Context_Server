@@ -872,9 +872,7 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 
 				// Check for nested callbacks calls inside this range using CURRENT depth
 				if t.Kind == "ident" && strings.EqualFold(t.Text, "callbacks") {
-					if nestedMethod, nestedArgs, _, nestedOk := extractCallbacksCall(tokens, j); nestedOk {
-						nestedEventName := stringArgValue(nestedArgs, 0)
-						nestedID := stringArgValue(nestedArgs, 1)
+					if nestedMethod, _, _, nestedOk := extractCallbacksCall(tokens, j); nestedOk {
 						nestedLine := t.Line
 
 						// Check nested call violations at CURRENT functionDepth
@@ -2224,6 +2222,8 @@ func findPython() string {
 	}
 	return "python"
 }
+
+func findLuac() string {
 	candidates := []string{
 		filepath.Join(filepath.Dir(os.Args[0]), "automations", "bin", "lua", "luac54.exe"),
 		filepath.Join(filepath.Dir(os.Args[0]), "automations", "bin", "lua", "luac5.4.exe"),

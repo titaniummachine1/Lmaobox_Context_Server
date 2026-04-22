@@ -11,10 +11,12 @@ try {
     $pythonVersion = python --version 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✓ Python found: $pythonVersion" -ForegroundColor Green
-    } else {
+    }
+    else {
         throw "Python not found"
     }
-} catch {
+}
+catch {
     Write-Host "⚠ Python 3 not found in PATH" -ForegroundColor Red
     Write-Host "Please install from: https://www.python.org/downloads/" -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
@@ -29,7 +31,8 @@ Write-Host "Installing Lua 5.4+ compiler..." -ForegroundColor Yellow
 python "$scriptDir/install_lua.py"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "⚠ Lua installation encountered issues. Check output above." -ForegroundColor Yellow
-} else {
+}
+else {
     Write-Host "✓ Lua installed successfully" -ForegroundColor Green
 }
 
@@ -40,7 +43,8 @@ python "$scriptDir/install_luacheck.py"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "⚠ luacheck installation is optional. You can install manually:" -ForegroundColor Yellow
     Write-Host "   pip install luacheck" -ForegroundColor Cyan
-} else {
+}
+else {
     Write-Host "✓ luacheck installed successfully" -ForegroundColor Green
 }
 
