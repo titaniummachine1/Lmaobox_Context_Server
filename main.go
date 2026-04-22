@@ -78,6 +78,11 @@ var defaultLboxMutationPolicy = LboxMutationPolicy{
 }
 
 func main() {
+	// Ensure dependencies are installed before starting server
+	if err := ensureDependencies(); err != nil {
+		log.Fatalf("Failed to initialize dependencies: %v", err)
+	}
+
 	// Create MCP server
 	s := server.NewMCPServer(
 		SERVER_NAME,
@@ -742,16 +747,16 @@ func validateLuaSyntax(ctx context.Context, filePath string) error {
 		return fmt.Errorf(formatLuaPolicyViolations(filePath, violations))
 	}
 
-	// Additional lint pass: run luacheck if available. Luacheck is optional; if not
-	// installed we'll silently skip this pass. If luacheck runs and reports issues,
-	// surface them as a failure so callers (and the MCP tool) reject the file.
+	// Additional lint pass: run luacheck. Since we ensure luacheck is installed
+	// at startup, this should never fail with "not found". If it does, it's a
+	// runtime error that should be reported.
 	luacheckIssues, lerr := runLuacheck(ctx, filePath)
 	if lerr != nil {
 		if !errors.Is(lerr, errLuacheckNotFound) {
 			return fmt.Errorf("luacheck failed: %v", lerr)
 		}
-		// luacheck not installed: skip
-		return nil
+		// This should not happen if ensureDependencies() ran successfully at startup
+		return fmt.Errorf("luacheck unexpectedly not found. Please restart the MCP server or ensure luacheck is in PATH")
 	}
 	if len(luacheckIssues) > 0 {
 		return fmt.Errorf(formatLuacheckIssues(filePath, luacheckIssues))
@@ -2153,7 +2158,72 @@ func scoreSmartCandidate(queryLower string, tokens []string, combinedLower, symb
 
 // ── end smart_search ─────────────────────────────────────────────────────────
 
-func findLuac() string {
+func ensureDependencies() error {
+	luacPath := findLuac()
+	luacheckPath := findLuacheck()
+
+	// If both are available, we're good
+	if luacPath != "" && luacheckPath != "" {
+		log.Printf("✓ Dependencies satisfied: Lua compiler found at %s, luacheck found at %s", luacPath, luacheckPath)
+		return nil
+	}
+
+	// Need to auto-install. Try running setup scripts.
+	scriptDir := filepath.Join(filepath.Dir(os.Args[0]), "automations")
+
+	if luacPath == "" {
+		log.Printf("Lua compiler not found, attempting auto-install...")
+		if err := runSetupScript(scriptDir, "install_lua.py"); err != nil {
+			return fmt.Errorf("Lua 5.4+ installation failed: %w\n"+
+				"Please install manually from: https://luabinaries.sourceforge.net/\n"+
+				"Or use: choco install lua (if you have Chocolatey)", err)
+		}
+		log.Printf("✓ Lua compiler installed successfully")
+	}
+
+	if luacheckPath == "" {
+		log.Printf("luacheck not found, attempting auto-install...")
+		if err := runSetupScript(scriptDir, "install_luacheck.py"); err != nil {
+			log.Printf("⚠ luacheck auto-install failed (non-critical): %v", err)
+			log.Printf("You can install manually: pip install luacheck OR npm install -g luacheck")
+			// Don't fail here - luacheck is optional for MCP functionality
+		} else {
+			log.Printf("✓ luacheck installed successfully")
+		}
+	}
+
+	return nil
+}
+
+func runSetupScript(scriptDir, scriptName string) error {
+	scriptPath := filepath.Join(scriptDir, scriptName)
+
+	// Check if script exists
+	if _, err := os.Stat(scriptPath); err != nil {
+		return fmt.Errorf("setup script not found at %s", scriptPath)
+	}
+
+	// Run the Python script
+	cmd := exec.Command(findPython(), scriptPath)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return fmt.Errorf("setup script %s failed: %s\n%s", scriptName, err, string(output))
+	}
+
+	log.Printf("Setup script output:\n%s", string(output))
+	return nil
+}
+
+func findPython() string {
+	candidates := []string{"python3", "python", "python.exe"}
+	for _, cmd := range candidates {
+		if _, err := exec.LookPath(cmd); err == nil {
+			return cmd
+		}
+	}
+	return "python"
+}
 	candidates := []string{
 		filepath.Join(filepath.Dir(os.Args[0]), "automations", "bin", "lua", "luac54.exe"),
 		filepath.Join(filepath.Dir(os.Args[0]), "automations", "bin", "lua", "luac5.4.exe"),

@@ -1,3 +1,51 @@
+# Automation Scripts & Dependency Setup
+
+## ⚡ Quick Start: Install All Dependencies
+
+Run one of these commands to auto-install Lua 5.4+ and luacheck:
+
+### Windows (PowerShell)
+```powershell
+cd automations
+.\setup-dependencies.ps1
+```
+
+### Windows (Command Prompt)
+```batch
+cd automations
+setup-dependencies.bat
+```
+
+### Linux/macOS
+```bash
+cd automations
+python3 install_lua.py
+python3 install_luacheck.py
+```
+
+**That's it!** The MCP server will auto-verify and install dependencies on startup.
+
+---
+
+## Automatic Dependency Management
+
+The server **automatically ensures all dependencies** when started:
+
+### What Gets Installed
+- **Lua 5.4+ Compiler** (required): For syntax validation
+- **luacheck** (recommended): For additional linting
+
+### How It Works
+1. Server starts → checks for dependencies
+2. If missing → auto-installs them silently
+3. If auto-install fails → clear error with manual fallback instructions
+4. Server continues normally
+
+### No User Action Needed
+Users just run the Go binary. Everything is handled automatically.
+
+---
+
 # Automation Scripts
 
 This folder contains automation scripts for building, deploying, and maintaining the Lua development environment.
