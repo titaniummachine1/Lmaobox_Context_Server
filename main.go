@@ -45,14 +45,21 @@ type BundleContext struct {
 }
 
 type LboxMutationPolicy struct {
-	RequireDepthZeroRegister   bool
-	RequireDepthZeroUnregister bool
-	RequireKillSwitchOrder     bool
-	ForbidRuntimeUnregister    bool
-	ForbidCollectGarbage       bool // collectgarbage() masks leaks, never allowed
-	ForbidRequireInFunction    bool // require() inside a function causes memory leaks
-	ForbidGlobalTable          bool // _G usage forbidden; use G module instead
-	ForbidCreateFontInFunction bool // draw.CreateFont inside a function creates irremovable fonts every call, crashing the game
+	RequireDepthZeroRegister    bool
+	RequireDepthZeroUnregister  bool
+	RequireKillSwitchOrder      bool
+	ForbidRuntimeUnregister     bool
+	ForbidCollectGarbage        bool // collectgarbage() masks leaks, never allowed
+	ForbidRequireInFunction     bool // require() inside a function causes memory leaks
+	ForbidGlobalTable           bool // _G usage forbidden; use G module instead
+	ForbidCreateFontInFunction  bool // draw.CreateFont inside a function creates irremovable fonts every call, crashing the game
+	ForbidLegacyBitLibrary      bool // bit.band/bit.bor/etc do not exist in Lua 5.4 and crash scripts
+	ForbidDeprecatedCallbacks   bool // PostPropUpdate is legacy-only and should not be used
+	ForbidAllowListener         bool // deprecated no-op API; exists only for legacy compatibility
+	ForbidForceFullUpdate       bool // dangerous API that can lag/crash if misused
+	RequireDrawTextFontSetup    bool // draw.Text requires draw.SetFont beforehand
+	ForbidWarpOutsideCreateMove bool // warp trigger calls should only happen inside CreateMove
+	ForbidSuspiciousSetupBones  bool // missing/wrong SetupBones args commonly produce bad data
 }
 
 type luaPolicyViolation struct {
@@ -75,14 +82,21 @@ const (
 )
 
 var defaultLboxMutationPolicy = LboxMutationPolicy{
-	RequireDepthZeroRegister:   true,
-	RequireDepthZeroUnregister: true,
-	RequireKillSwitchOrder:     true,
-	ForbidRuntimeUnregister:    true,
-	ForbidCollectGarbage:       true,
-	ForbidRequireInFunction:    true,
-	ForbidGlobalTable:          true,
-	ForbidCreateFontInFunction: true,
+	RequireDepthZeroRegister:    true,
+	RequireDepthZeroUnregister:  true,
+	RequireKillSwitchOrder:      true,
+	ForbidRuntimeUnregister:     true,
+	ForbidCollectGarbage:        true,
+	ForbidRequireInFunction:     true,
+	ForbidGlobalTable:           true,
+	ForbidCreateFontInFunction:  true,
+	ForbidLegacyBitLibrary:      true,
+	ForbidDeprecatedCallbacks:   true,
+	ForbidAllowListener:         true,
+	ForbidForceFullUpdate:       true,
+	RequireDrawTextFontSetup:    true,
+	ForbidWarpOutsideCreateMove: true,
+	ForbidSuspiciousSetupBones:  true,
 }
 
 func main() {
@@ -778,8 +792,9 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file for policy scan: %v", err)
 	}
+	content := string(contentBytes)
 
-	tokens, err := tokenizeLua(string(contentBytes))
+	tokens, err := tokenizeLua(content)
 	if err != nil {
 		return nil, err
 	}
@@ -788,6 +803,8 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 	blockStack := make([]luaPolicyBlockKind, 0)
 	functionDepth := 0
 	unregisteredAtDepthZero := make(map[string]bool)
+	hasDrawSetFont := hasQualifiedCall(tokens, "draw", "SetFont")
+	hasDrawText := hasQualifiedCall(tokens, "draw", "Text")
 
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
@@ -798,6 +815,13 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 			uniqueID := stringArgValue(args, 1)
 
 			if strings.EqualFold(method, "register") {
+				if policy.ForbidDeprecatedCallbacks && strings.EqualFold(eventName, "PostPropUpdate") {
+					violations = append(violations, luaPolicyViolation{
+						Line:    line,
+						Message: "CRITICAL: PostPropUpdate is deprecated legacy-only callback usage — use FrameStageNotify instead",
+					})
+				}
+
 				if policy.RequireDepthZeroRegister && functionDepth > 0 {
 					violations = append(violations, luaPolicyViolation{
 						Line:    line,
@@ -822,6 +846,13 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 			}
 
 			if strings.EqualFold(method, "unregister") {
+				if policy.ForbidDeprecatedCallbacks && strings.EqualFold(eventName, "PostPropUpdate") {
+					violations = append(violations, luaPolicyViolation{
+						Line:    line,
+						Message: "CRITICAL: PostPropUpdate is deprecated legacy-only callback usage — use FrameStageNotify instead",
+					})
+				}
+
 				reportedRuntimeUnregister := false
 				if policy.ForbidRuntimeUnregister && functionDepth > 0 {
 					violations = append(violations, luaPolicyViolation{
@@ -848,6 +879,15 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 						killSwitchKey := strings.ToLower(eventName + "|")
 						unregisteredAtDepthZero[killSwitchKey] = true
 					}
+				}
+			}
+
+			if policy.ForbidWarpOutsideCreateMove && strings.EqualFold(method, "register") {
+				if callbackLine := findQualifiedCallLineInArgs(args, "warp", []string{"TriggerWarp", "TriggerDoubleTap", "TriggerCharge"}); callbackLine > 0 && !strings.EqualFold(eventName, "CreateMove") {
+					violations = append(violations, luaPolicyViolation{
+						Line:    callbackLine,
+						Message: "CRITICAL: warp trigger calls must be made from a CreateMove callback only",
+					})
 				}
 			}
 
@@ -1033,9 +1073,212 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 				})
 			}
 		}
+
+		// Lua 5.1 legacy bit.* helpers do not exist in Lua 5.4.
+		if policy.ForbidLegacyBitLibrary && strings.EqualFold(tok.Text, "bit") {
+			if i+3 < len(tokens) &&
+				tokens[i+1].Kind == "symbol" && tokens[i+1].Text == "." &&
+				tokens[i+2].Kind == "ident" &&
+				isLegacyBitMethod(tokens[i+2].Text) &&
+				tokens[i+3].Kind == "symbol" && tokens[i+3].Text == "(" {
+				violations = append(violations, luaPolicyViolation{
+					Line:    tok.Line,
+					Message: fmt.Sprintf("CRITICAL: bit.%s() does not exist in Lua 5.4 — use native bitwise operators instead", tokens[i+2].Text),
+				})
+			}
+		}
+
+		if policy.ForbidAllowListener && tok.Text == "AllowListener" {
+			if i+1 < len(tokens) && tokens[i+1].Kind == "symbol" && tokens[i+1].Text == "(" {
+				violations = append(violations, luaPolicyViolation{
+					Line:    tok.Line,
+					Message: "CRITICAL: AllowListener() is deprecated and does nothing — remove the call",
+				})
+			}
+		}
+
+		if policy.ForbidForceFullUpdate && tok.Text == "ForceFullUpdate" {
+			if i+1 < len(tokens) && tokens[i+1].Kind == "symbol" && tokens[i+1].Text == "(" {
+				violations = append(violations, luaPolicyViolation{
+					Line:    tok.Line,
+					Message: "CRITICAL: ForceFullUpdate() is dangerous and should be avoided — it can lag or crash the game if misused",
+				})
+			}
+		}
+
+		if policy.ForbidWarpOutsideCreateMove && strings.EqualFold(tok.Text, "warp") && functionDepth2 == 0 {
+			if i+3 < len(tokens) &&
+				tokens[i+1].Kind == "symbol" && tokens[i+1].Text == "." &&
+				tokens[i+2].Kind == "ident" &&
+				isWarpTriggerMethod(tokens[i+2].Text) &&
+				tokens[i+3].Kind == "symbol" && tokens[i+3].Text == "(" {
+				violations = append(violations, luaPolicyViolation{
+					Line:    tok.Line,
+					Message: "CRITICAL: warp trigger calls must be made from a CreateMove callback only",
+				})
+			}
+		}
+	}
+
+	if policy.RequireDrawTextFontSetup && hasDrawText && !hasDrawSetFont {
+		if line := findQualifiedCallLine(tokens, "draw", []string{"Text"}); line > 0 {
+			violations = append(violations, luaPolicyViolation{
+				Line:    line,
+				Message: "CRITICAL: draw.Text() requires draw.SetFont() to be called first or the script will error",
+			})
+		}
+	}
+
+	if policy.ForbidSuspiciousSetupBones {
+		violations = append(violations, findSuspiciousSetupBonesViolations(content, tokens)...)
 	}
 
 	return violations, nil
+}
+
+func hasQualifiedCall(tokens []luaToken, root string, method string) bool {
+	return findQualifiedCallLine(tokens, root, []string{method}) > 0
+}
+
+func findQualifiedCallLine(tokens []luaToken, root string, methods []string) int {
+	for i := 0; i+3 < len(tokens); i++ {
+		if !(tokens[i].Kind == "ident" && strings.EqualFold(tokens[i].Text, root)) {
+			continue
+		}
+		if tokens[i+1].Kind != "symbol" || tokens[i+1].Text != "." {
+			continue
+		}
+		if tokens[i+2].Kind != "ident" {
+			continue
+		}
+		matched := false
+		for _, method := range methods {
+			if strings.EqualFold(tokens[i+2].Text, method) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		if tokens[i+3].Kind == "symbol" && tokens[i+3].Text == "(" {
+			return tokens[i].Line
+		}
+	}
+	return 0
+}
+
+func findQualifiedCallLineInArgs(args [][]luaToken, root string, methods []string) int {
+	for _, arg := range args {
+		if line := findQualifiedCallLine(arg, root, methods); line > 0 {
+			return line
+		}
+	}
+	return 0
+}
+
+func isLegacyBitMethod(name string) bool {
+	switch strings.ToLower(name) {
+	case "band", "bor", "bnot", "bxor", "lshift", "rshift", "arshift":
+		return true
+	default:
+		return false
+	}
+}
+
+func isWarpTriggerMethod(name string) bool {
+	switch strings.ToLower(name) {
+	case "triggerwarp", "triggerdoubletap", "triggercharge":
+		return true
+	default:
+		return false
+	}
+}
+
+func findSuspiciousSetupBonesViolations(content string, tokens []luaToken) []luaPolicyViolation {
+	patterns := []struct {
+		re      *regexp.Regexp
+		message string
+	}{
+		{
+			re:      regexp.MustCompile(`(?m):SetupBones\s*\(\s*0\s*[,)]`),
+			message: "CRITICAL: SetupBones with mask 0 returns no useful bones for hitbox work — use 0x7ff00",
+		},
+		{
+			re:      regexp.MustCompile(`(?m):SetupBones\s*\(\s*(?:255|0x0*ff)\s*[,)]`),
+			message: "CRITICAL: SetupBones with mask 255 is too narrow for hitbox work — use 0x7ff00",
+		},
+	}
+
+	violations := make([]luaPolicyViolation, 0)
+	for _, pattern := range patterns {
+		matches := pattern.re.FindAllStringIndex(content, -1)
+		for _, match := range matches {
+			violations = append(violations, luaPolicyViolation{
+				Line:    lineNumberForOffset(content, match[0]),
+				Message: pattern.message,
+			})
+		}
+	}
+
+	for i := 0; i+1 < len(tokens); i++ {
+		if !(tokens[i].Kind == "ident" && strings.EqualFold(tokens[i].Text, "SetupBones")) {
+			continue
+		}
+		if tokens[i+1].Kind != "symbol" || tokens[i+1].Text != "(" {
+			continue
+		}
+		args, _ := collectLuaCallArgs(tokens, i+1)
+		if len(args) == 0 {
+			violations = append(violations, luaPolicyViolation{
+				Line:    tokens[i].Line,
+				Message: "CRITICAL: SetupBones() should pass bone mask 0x7ff00 and globals.CurTime() — omitting both commonly returns incomplete or wrong data",
+			})
+			continue
+		}
+		if !argContainsQualifiedCall(args, "globals", "CurTime") {
+			violations = append(violations, luaPolicyViolation{
+				Line:    tokens[i].Line,
+				Message: "CRITICAL: SetupBones should use globals.CurTime() as the time argument — passing 0 or omitting time gives incorrect positions",
+			})
+		}
+	}
+
+	return dedupeLuaPolicyViolations(violations)
+}
+
+func argContainsQualifiedCall(args [][]luaToken, root string, method string) bool {
+	return findQualifiedCallLineInArgs(args, root, []string{method}) > 0
+}
+
+func lineNumberForOffset(content string, offset int) int {
+	if offset <= 0 {
+		return 1
+	}
+	line := 1
+	for i, r := range content {
+		if i >= offset {
+			break
+		}
+		if r == '\n' {
+			line++
+		}
+	}
+	return line
+}
+
+func dedupeLuaPolicyViolations(violations []luaPolicyViolation) []luaPolicyViolation {
+	seen := make(map[string]bool, len(violations))
+	out := make([]luaPolicyViolation, 0, len(violations))
+	for _, violation := range violations {
+		key := fmt.Sprintf("%d|%s", violation.Line, violation.Message)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, violation)
+	}
+	return out
 }
 
 func formatLuaPolicyViolations(filePath string, violations []luaPolicyViolation) string {

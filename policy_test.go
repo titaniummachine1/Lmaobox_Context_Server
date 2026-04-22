@@ -361,3 +361,151 @@ end)
 		}
 	}
 }
+
+func TestLegacyBitLibraryRejected(t *testing.T) {
+	src := `
+local flags = bit.band(cmd.buttons, IN_ATTACK)
+`
+	path := writeTempLua(t, "legacy_bit", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	found := false
+	for _, v := range violations {
+		if strings.Contains(v.Message, "bit.band") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected bit.band violation, got: %+v", violations)
+	}
+}
+
+func TestDrawTextWithoutSetFontRejected(t *testing.T) {
+	src := `
+callbacks.unregister("Draw", "HUD")
+callbacks.register("Draw", "HUD", function()
+    draw.Text(10, 10, "hello")
+end)
+`
+	path := writeTempLua(t, "draw_text_no_font", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	found := false
+	for _, v := range violations {
+		if strings.Contains(v.Message, "draw.Text() requires draw.SetFont()") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected draw.Text font setup violation, got: %+v", violations)
+	}
+}
+
+func TestPostPropUpdateRejected(t *testing.T) {
+	src := `
+callbacks.unregister("PostPropUpdate", "Legacy")
+callbacks.register("PostPropUpdate", "Legacy", function() end)
+`
+	path := writeTempLua(t, "post_prop_update", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	found := false
+	for _, v := range violations {
+		if strings.Contains(v.Message, "PostPropUpdate is deprecated") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected PostPropUpdate violation, got: %+v", violations)
+	}
+}
+
+func TestWarpTriggerOutsideCreateMoveRejected(t *testing.T) {
+	src := `
+callbacks.unregister("Draw", "warp_bad")
+callbacks.register("Draw", "warp_bad", function()
+    warp.TriggerWarp()
+end)
+`
+	path := writeTempLua(t, "warp_outside_createmove", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	found := false
+	for _, v := range violations {
+		if strings.Contains(v.Message, "warp trigger calls must be made from a CreateMove callback") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected warp trigger location violation, got: %+v", violations)
+	}
+}
+
+func TestWarpTriggerInsideCreateMoveAllowed(t *testing.T) {
+	src := `
+callbacks.unregister("CreateMove", "warp_ok")
+callbacks.register("CreateMove", "warp_ok", function(cmd)
+    warp.TriggerWarp()
+end)
+`
+	path := writeTempLua(t, "warp_inside_createmove", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	for _, v := range violations {
+		if strings.Contains(v.Message, "warp trigger calls must be made from a CreateMove callback") {
+			t.Fatalf("unexpected warp trigger violation: %+v", violations)
+		}
+	}
+}
+
+func TestSuspiciousSetupBonesRejected(t *testing.T) {
+	src := `
+local bones = entity:SetupBones()
+local badMask = entity:SetupBones(0, globals.CurTime())
+`
+	path := writeTempLua(t, "setupbones_bad", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	found := false
+	for _, v := range violations {
+		if strings.Contains(v.Message, "SetupBones") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected SetupBones violation, got: %+v", violations)
+	}
+}
+
+func TestCanonicalSetupBonesAllowed(t *testing.T) {
+	src := `
+local bones = entity:SetupBones(0x7ff00, globals.CurTime())
+`
+	path := writeTempLua(t, "setupbones_ok", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	for _, v := range violations {
+		if strings.Contains(v.Message, "SetupBones") {
+			t.Fatalf("unexpected SetupBones violation: %+v", violations)
+		}
+	}
+}
