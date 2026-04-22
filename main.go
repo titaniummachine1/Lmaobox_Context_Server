@@ -214,6 +214,14 @@ func handleLuacheck(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
+		advisories, err := collectLuaAdvisoryWarnings(filePath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("warning scan failed: %v", err)), nil
+		}
+		if len(advisories) > 0 {
+			return mcp.NewToolResultText(formatLuaValidationSuccessWithWarnings(advisories)), nil
+		}
+
 		return mcp.NewToolResultText("✓ Lua syntax is valid and passed Zero-Mutation callback policy"), nil
 	}
 }
@@ -741,6 +749,16 @@ func formatLuacheckIssues(filePath string, issues []string) string {
 		builder.WriteString(fmt.Sprintf("- %s\n", issue))
 	}
 
+	return builder.String()
+}
+
+func formatLuaValidationSuccessWithWarnings(warnings []string) string {
+	var builder strings.Builder
+	builder.WriteString("✓ Lua syntax is valid and passed Zero-Mutation callback policy\n")
+	builder.WriteString("\nStyle warning(s):\n")
+	for _, warning := range warnings {
+		builder.WriteString(fmt.Sprintf("- %s\n", warning))
+	}
 	return builder.String()
 }
 

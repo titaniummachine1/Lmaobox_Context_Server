@@ -21,6 +21,7 @@ type LboxMutationPolicy struct {
 	ForbidAllowListener          bool
 	ForbidForceFullUpdate        bool
 	RequireDrawTextFontSetup     bool
+	RequireDrawColorSetup        bool
 	ForbidWarpOutsideCreateMove  bool
 	ForbidSuspiciousSetupBones   bool
 	ForbidIpairsOnFindByClass    bool
@@ -34,11 +35,37 @@ type luaPolicyViolation struct {
 
 type luaPolicyBlockKind int
 
+type luaFontBindingKind int
+
 const (
 	luaBlockGeneric luaPolicyBlockKind = iota
 	luaBlockFunction
 	luaBlockRepeat
 )
+
+const (
+	luaFontBindingUnknown luaFontBindingKind = iota
+	luaFontBindingValid
+	luaFontBindingInvalid
+)
+
+type luaFontBinding struct {
+	Line int
+	Kind luaFontBindingKind
+}
+
+type luaDrawState struct {
+	hasColor bool
+	hasFont  bool
+}
+
+type luaDrawAnalysisContext struct {
+	policy       LboxMutationPolicy
+	fontBindings map[string][]luaFontBinding
+	functions    map[string][]luaToken
+	callerCounts map[string]int
+	visiting     map[string]bool
+}
 
 var defaultLboxMutationPolicy = LboxMutationPolicy{
 	RequireDepthZeroRegister:     true,
@@ -54,6 +81,7 @@ var defaultLboxMutationPolicy = LboxMutationPolicy{
 	ForbidAllowListener:          true,
 	ForbidForceFullUpdate:        true,
 	RequireDrawTextFontSetup:     true,
+	RequireDrawColorSetup:        true,
 	ForbidWarpOutsideCreateMove:  true,
 	ForbidSuspiciousSetupBones:   true,
 	ForbidIpairsOnFindByClass:    true,
@@ -76,8 +104,6 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 	blockStack := make([]luaPolicyBlockKind, 0)
 	functionDepth := 0
 	unregisteredAtDepthZero := make(map[string]bool)
-	hasDrawSetFont := hasQualifiedCall(tokens, "draw", "SetFont")
-	hasDrawText := hasQualifiedCall(tokens, "draw", "Text")
 
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
@@ -273,10 +299,8 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 		}
 	}
 
-	if policy.RequireDrawTextFontSetup && hasDrawText && !hasDrawSetFont {
-		if line := findQualifiedCallLine(tokens, "draw", []string{"Text"}); line > 0 {
-			violations = append(violations, luaPolicyViolation{Line: line, Message: "CRITICAL: draw.Text() requires draw.SetFont() to be called first or the script will error"})
-		}
+	if policy.RequireDrawTextFontSetup || policy.RequireDrawColorSetup {
+		violations = append(violations, findDrawStateViolations(content, tokens, policy)...)
 	}
 	if policy.ForbidSuspiciousSetupBones {
 		violations = append(violations, findSuspiciousSetupBonesViolations(content, tokens)...)
@@ -289,6 +313,491 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 	}
 
 	return violations, nil
+}
+
+func findDrawStateViolations(content string, tokens []luaToken, policy LboxMutationPolicy) []luaPolicyViolation {
+	violations := make([]luaPolicyViolation, 0)
+	ctx := buildLuaDrawAnalysisContext(content, tokens, policy)
+
+	for i := 0; i < len(tokens); i++ {
+		method, args, _, ok := extractCallbacksCall(tokens, i)
+		if !ok || !strings.EqualFold(method, "register") {
+			continue
+		}
+
+		eventName := stringArgValue(args, 0)
+		if !strings.EqualFold(eventName, "Draw") {
+			continue
+		}
+
+		handlerArg := callbackHandlerArg(args)
+		handlerTokens, ok := resolveCallbackHandlerTokens(tokens, handlerArg)
+		if !ok {
+			continue
+		}
+
+		_, handlerViolations := analyzeLuaDrawFunctionTokens(handlerTokens, "", luaDrawState{}, false, ctx)
+		violations = append(violations, handlerViolations...)
+	}
+
+	return dedupeLuaPolicyViolations(violations)
+}
+
+func buildLuaDrawAnalysisContext(content string, tokens []luaToken, policy LboxMutationPolicy) *luaDrawAnalysisContext {
+	functions := collectNamedLuaFunctions(tokens)
+	callerCounts := collectLuaFunctionCallerCounts(tokens, functions)
+
+	return &luaDrawAnalysisContext{
+		policy:       policy,
+		fontBindings: collectLuaFontBindings(content),
+		functions:    functions,
+		callerCounts: callerCounts,
+		visiting:     make(map[string]bool),
+	}
+}
+
+func collectNamedLuaFunctions(tokens []luaToken) map[string][]luaToken {
+	functions := make(map[string][]luaToken)
+	for i := 0; i+1 < len(tokens); i++ {
+		functionIndex := -1
+		nameIndex := -1
+
+		if tokens[i].Kind == "keyword" && tokens[i].Text == "function" && i+1 < len(tokens) && tokens[i+1].Kind == "ident" {
+			functionIndex = i
+			nameIndex = i + 1
+		} else if tokens[i].Kind == "keyword" && tokens[i].Text == "local" && i+2 < len(tokens) && tokens[i+1].Kind == "keyword" && tokens[i+1].Text == "function" && tokens[i+2].Kind == "ident" {
+			functionIndex = i + 1
+			nameIndex = i + 2
+		}
+
+		if functionIndex < 0 || nameIndex < 0 {
+			continue
+		}
+		endIndex, ok := findFunctionEndIndex(tokens, functionIndex)
+		if !ok {
+			continue
+		}
+		name := strings.ToLower(tokens[nameIndex].Text)
+		if _, exists := functions[name]; !exists {
+			functions[name] = tokens[functionIndex : endIndex+1]
+		}
+		i = endIndex
+	}
+	return functions
+}
+
+func collectLuaFunctionCallerCounts(tokens []luaToken, functions map[string][]luaToken) map[string]int {
+	callerCounts := make(map[string]int)
+	for i := 0; i < len(tokens); i++ {
+		method, args, _, ok := extractCallbacksCall(tokens, i)
+		if !ok || !strings.EqualFold(method, "register") {
+			continue
+		}
+		handlerArg := callbackHandlerArg(args)
+		if len(handlerArg) == 1 && handlerArg[0].Kind == "ident" {
+			name := strings.ToLower(handlerArg[0].Text)
+			if _, exists := functions[name]; exists {
+				callerCounts[name]++
+			}
+		}
+	}
+
+	for name, functionTokens := range functions {
+		_ = name
+		for _, calleeName := range collectDirectLuaFunctionCalls(functionTokens, functions) {
+			callerCounts[calleeName]++
+		}
+	}
+
+	return callerCounts
+}
+
+func collectDirectLuaFunctionCalls(tokens []luaToken, functions map[string][]luaToken) []string {
+	callNames := make([]string, 0)
+	bodyStart, bodyEnd, ok := findLuaFunctionBodyBounds(tokens)
+	if !ok {
+		return callNames
+	}
+
+	for i := bodyStart; i < bodyEnd; i++ {
+		if tokens[i].Kind == "keyword" && tokens[i].Text == "function" {
+			endIndex, ok := findFunctionEndIndex(tokens, i)
+			if ok {
+				i = endIndex
+				continue
+			}
+		}
+		calleeName, _, endIndex, ok := extractSimpleLuaFunctionCall(tokens, i, functions)
+		if !ok {
+			continue
+		}
+		callNames = append(callNames, calleeName)
+		i = endIndex
+	}
+
+	return dedupeStrings(callNames)
+}
+
+func analyzeLuaDrawFunctionTokens(tokens []luaToken, functionName string, incomingState luaDrawState, resetAtEntry bool, ctx *luaDrawAnalysisContext) (luaDrawState, []luaPolicyViolation) {
+	state := incomingState
+	if resetAtEntry {
+		state = luaDrawState{}
+	}
+
+	lowerName := strings.ToLower(functionName)
+	if lowerName != "" {
+		if ctx.visiting[lowerName] {
+			return state, nil
+		}
+		ctx.visiting[lowerName] = true
+		defer delete(ctx.visiting, lowerName)
+	}
+
+	violations := make([]luaPolicyViolation, 0)
+	bodyStart, bodyEnd, ok := findLuaFunctionBodyBounds(tokens)
+	if !ok {
+		return state, violations
+	}
+
+	for i := bodyStart; i < bodyEnd; i++ {
+		if tokens[i].Kind == "keyword" && tokens[i].Text == "function" {
+			endIndex, ok := findFunctionEndIndex(tokens, i)
+			if ok {
+				i = endIndex
+				continue
+			}
+		}
+
+		if line, methodName, endIndex, ok := extractQualifiedDrawCall(tokens, i); ok {
+			switch {
+			case strings.EqualFold(methodName, "Color"):
+				state.hasColor = true
+			case strings.EqualFold(methodName, "SetFont"):
+				bindingKind, knownInvalid := classifySetFontSource(tokens, i+3, ctx.fontBindings)
+				if knownInvalid {
+					violations = append(violations, luaPolicyViolation{Line: line, Message: "CRITICAL: draw.SetFont() uses a font handle that is statically known invalid here — bind it from draw.CreateFont(...) or a known font source before using draw.Text()"})
+				} else {
+					state.hasFont = true
+				}
+				_ = bindingKind
+			default:
+				if ctx.policy.RequireDrawTextFontSetup && isDrawTextMethod(methodName) && !state.hasFont {
+					violations = append(violations, luaPolicyViolation{Line: line, Message: fmt.Sprintf("CRITICAL: draw.%s() requires draw.SetFont() earlier in the same Draw callback chain — font state is not reliable across frames and missing setup can render gibberish", methodName)})
+				}
+				if ctx.policy.RequireDrawColorSetup && isDrawRenderableMethod(methodName) && !state.hasColor {
+					violations = append(violations, luaPolicyViolation{Line: line, Message: fmt.Sprintf("CRITICAL: draw.%s() requires draw.Color() earlier in the same Draw callback chain — render state resets like a palette and missing color leaves output invisible", methodName)})
+				}
+			}
+			i = endIndex
+			continue
+		}
+
+		calleeName, calleeTokens, endIndex, ok := extractSimpleLuaFunctionCall(tokens, i, ctx.functions)
+		if !ok {
+			continue
+		}
+		calleeState, calleeViolations := analyzeLuaDrawFunctionTokens(calleeTokens, calleeName, state, ctx.callerCounts[calleeName] > 1, ctx)
+		state = calleeState
+		violations = append(violations, calleeViolations...)
+		i = endIndex
+	}
+
+	return state, dedupeLuaPolicyViolations(violations)
+}
+
+func findLuaFunctionBodyBounds(tokens []luaToken) (int, int, bool) {
+	functionIndex := -1
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].Kind == "keyword" && tokens[i].Text == "function" {
+			functionIndex = i
+			break
+		}
+	}
+	if functionIndex < 0 {
+		return 0, 0, false
+	}
+
+	openParenIndex := -1
+	for i := functionIndex + 1; i < len(tokens); i++ {
+		if tokens[i].Kind == "symbol" && tokens[i].Text == "(" {
+			openParenIndex = i
+			break
+		}
+	}
+	if openParenIndex < 0 {
+		return 0, 0, false
+	}
+
+	_, closeParenIndex := collectLuaCallArgs(tokens, openParenIndex)
+	if closeParenIndex <= openParenIndex {
+		return 0, 0, false
+	}
+	return closeParenIndex + 1, len(tokens) - 1, true
+}
+
+func extractQualifiedDrawCall(tokens []luaToken, start int) (int, string, int, bool) {
+	if start+3 >= len(tokens) {
+		return 0, "", start, false
+	}
+	if !(tokens[start].Kind == "ident" && strings.EqualFold(tokens[start].Text, "draw")) {
+		return 0, "", start, false
+	}
+	if tokens[start+1].Kind != "symbol" || tokens[start+1].Text != "." || tokens[start+2].Kind != "ident" || tokens[start+3].Kind != "symbol" || tokens[start+3].Text != "(" {
+		return 0, "", start, false
+	}
+	_, endIndex := collectLuaCallArgs(tokens, start+3)
+	if endIndex <= start+3 {
+		return 0, "", start, false
+	}
+	return tokens[start].Line, tokens[start+2].Text, endIndex, true
+}
+
+func extractSimpleLuaFunctionCall(tokens []luaToken, start int, functions map[string][]luaToken) (string, []luaToken, int, bool) {
+	if start+1 >= len(tokens) {
+		return "", nil, start, false
+	}
+	if tokens[start].Kind != "ident" {
+		return "", nil, start, false
+	}
+	if tokens[start+1].Kind != "symbol" || tokens[start+1].Text != "(" {
+		return "", nil, start, false
+	}
+	if start > 0 {
+		prev := tokens[start-1]
+		if prev.Kind == "symbol" && prev.Text == "." {
+			return "", nil, start, false
+		}
+		if prev.Kind == "keyword" && prev.Text == "function" {
+			return "", nil, start, false
+		}
+	}
+
+	name := strings.ToLower(tokens[start].Text)
+	functionTokens, exists := functions[name]
+	if !exists {
+		return "", nil, start, false
+	}
+	_, endIndex := collectLuaCallArgs(tokens, start+1)
+	if endIndex <= start+1 {
+		return "", nil, start, false
+	}
+	return name, functionTokens, endIndex, true
+}
+
+func collectLuaFontBindings(content string) map[string][]luaFontBinding {
+	lines := strings.Split(content, "\n")
+	bindings := make(map[string][]luaFontBinding)
+	validPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`^\s*(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*draw\s*\.\s*CreateFont\s*\(`),
+		regexp.MustCompile(`^\s*(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*Fonts\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\b`),
+	}
+	invalidPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`^\s*(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*nil\s*$`),
+		regexp.MustCompile(`^\s*(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*false\s*$`),
+		regexp.MustCompile(`^\s*(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"[^"]*"\s*$`),
+		regexp.MustCompile(`^\s*(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*'[^']*'\s*$`),
+	}
+
+	for index, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "--") {
+			continue
+		}
+
+		for _, pattern := range validPatterns {
+			if matches := pattern.FindStringSubmatch(line); len(matches) == 2 {
+				bindings[matches[1]] = append(bindings[matches[1]], luaFontBinding{Line: index + 1, Kind: luaFontBindingValid})
+				goto nextLine
+			}
+		}
+		for _, pattern := range invalidPatterns {
+			if matches := pattern.FindStringSubmatch(line); len(matches) == 2 {
+				bindings[matches[1]] = append(bindings[matches[1]], luaFontBinding{Line: index + 1, Kind: luaFontBindingInvalid})
+				goto nextLine
+			}
+		}
+
+	nextLine:
+	}
+
+	return bindings
+}
+
+func classifySetFontSource(tokens []luaToken, openParenIndex int, bindings map[string][]luaFontBinding) (luaFontBindingKind, bool) {
+	args, _ := collectLuaCallArgs(tokens, openParenIndex)
+	if len(args) == 0 {
+		return luaFontBindingUnknown, false
+	}
+	arg := trimLuaArgTokens(args[0])
+	if len(arg) == 0 {
+		return luaFontBindingUnknown, false
+	}
+
+	if isCreateFontExpression(arg) || isKnownFontExpression(arg) {
+		return luaFontBindingValid, false
+	}
+	if isStaticallyInvalidFontExpression(arg) {
+		return luaFontBindingInvalid, true
+	}
+	if len(arg) == 1 && arg[0].Kind == "ident" {
+		bindingKind := resolveLuaFontBinding(bindings, arg[0].Text, arg[0].Line)
+		if bindingKind == luaFontBindingInvalid {
+			return bindingKind, true
+		}
+		if bindingKind == luaFontBindingValid {
+			return bindingKind, false
+		}
+	}
+
+	return luaFontBindingUnknown, false
+}
+
+func resolveLuaFontBinding(bindings map[string][]luaFontBinding, name string, line int) luaFontBindingKind {
+	entries := bindings[name]
+	resolvedKind := luaFontBindingUnknown
+	for _, entry := range entries {
+		if entry.Line > line {
+			break
+		}
+		resolvedKind = entry.Kind
+	}
+	return resolvedKind
+}
+
+func isCreateFontExpression(tokens []luaToken) bool {
+	return tokenSliceStartsWithQualifiedCall(tokens, "draw", "CreateFont")
+}
+
+func isKnownFontExpression(tokens []luaToken) bool {
+	if len(tokens) == 3 && tokens[0].Kind == "ident" && strings.EqualFold(tokens[0].Text, "Fonts") && tokens[1].Kind == "symbol" && tokens[1].Text == "." && tokens[2].Kind == "ident" {
+		return true
+	}
+	return false
+}
+
+func isStaticallyInvalidFontExpression(tokens []luaToken) bool {
+	if len(tokens) != 1 {
+		return false
+	}
+	if tokens[0].Kind == "string" {
+		return true
+	}
+	if tokens[0].Kind == "keyword" {
+		return tokens[0].Text == "nil" || tokens[0].Text == "false"
+	}
+	return false
+}
+
+func tokenSliceStartsWithQualifiedCall(tokens []luaToken, root string, method string) bool {
+	if len(tokens) < 4 {
+		return false
+	}
+	return tokens[0].Kind == "ident" && strings.EqualFold(tokens[0].Text, root) &&
+		tokens[1].Kind == "symbol" && tokens[1].Text == "." &&
+		tokens[2].Kind == "ident" && strings.EqualFold(tokens[2].Text, method) &&
+		tokens[3].Kind == "symbol" && tokens[3].Text == "("
+}
+
+func callbackHandlerArg(args [][]luaToken) []luaToken {
+	if len(args) >= 3 {
+		return trimLuaArgTokens(args[2])
+	}
+	if len(args) >= 2 {
+		return trimLuaArgTokens(args[1])
+	}
+	return nil
+}
+
+func resolveCallbackHandlerTokens(tokens []luaToken, handlerArg []luaToken) ([]luaToken, bool) {
+	if len(handlerArg) == 0 {
+		return nil, false
+	}
+	if handlerArg[0].Kind == "keyword" && handlerArg[0].Text == "function" {
+		return handlerArg, true
+	}
+	if len(handlerArg) == 1 && handlerArg[0].Kind == "ident" {
+		return findNamedFunctionTokens(tokens, handlerArg[0].Text)
+	}
+	return nil, false
+}
+
+func findNamedFunctionTokens(tokens []luaToken, functionName string) ([]luaToken, bool) {
+	for i := 0; i+2 < len(tokens); i++ {
+		if tokens[i].Kind != "keyword" || tokens[i].Text != "function" {
+			continue
+		}
+		if tokens[i+1].Kind != "ident" || !strings.EqualFold(tokens[i+1].Text, functionName) {
+			continue
+		}
+		endIndex, ok := findFunctionEndIndex(tokens, i)
+		if !ok {
+			return nil, false
+		}
+		return tokens[i : endIndex+1], true
+	}
+	return nil, false
+}
+
+func findFunctionEndIndex(tokens []luaToken, functionIndex int) (int, bool) {
+	if functionIndex < 0 || functionIndex >= len(tokens) {
+		return 0, false
+	}
+
+	blockStack := []luaPolicyBlockKind{luaBlockFunction}
+	for i := functionIndex + 1; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tok.Kind != "keyword" {
+			continue
+		}
+
+		switch tok.Text {
+		case "function":
+			blockStack = append(blockStack, luaBlockFunction)
+		case "if", "for", "while", "do":
+			blockStack = append(blockStack, luaBlockGeneric)
+		case "repeat":
+			blockStack = append(blockStack, luaBlockRepeat)
+		case "until":
+			for j := len(blockStack) - 1; j >= 0; j-- {
+				if blockStack[j] == luaBlockRepeat {
+					blockStack = append(blockStack[:j], blockStack[j+1:]...)
+					break
+				}
+			}
+		case "end":
+			for j := len(blockStack) - 1; j >= 0; j-- {
+				if blockStack[j] == luaBlockRepeat {
+					continue
+				}
+				endedBlock := blockStack[j]
+				blockStack = append(blockStack[:j], blockStack[j+1:]...)
+				if endedBlock == luaBlockFunction && len(blockStack) == 0 {
+					return i, true
+				}
+				break
+			}
+		}
+	}
+
+	return 0, false
+}
+
+func isDrawTextMethod(name string) bool {
+	switch strings.ToLower(name) {
+	case "text", "textshadow":
+		return true
+	default:
+		return false
+	}
+}
+
+func isDrawRenderableMethod(name string) bool {
+	switch strings.ToLower(name) {
+	case "text", "textshadow", "line", "filledrect", "outlinedrect", "filledrectfade", "filledrectfastfade", "circle", "filledcircle", "coloredcircle", "texturedrect", "texturedpolygon":
+		return true
+	default:
+		return false
+	}
 }
 
 func hasQualifiedCall(tokens []luaToken, root string, method string) bool {
@@ -424,6 +933,68 @@ func formatLuaPolicyViolations(filePath string, violations []luaPolicyViolation)
 	return builder.String()
 }
 
+func collectLuaAdvisoryWarnings(filePath string) ([]string, error) {
+	contentBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file for advisory scan: %v", err)
+	}
+	tokens, err := tokenizeLua(string(contentBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	warnings := make([]string, 0)
+	for i := 0; i < len(tokens); i++ {
+		if method, args, _, ok := extractCallbacksCall(tokens, i); ok {
+			if !strings.EqualFold(method, "register") {
+				continue
+			}
+			if len(args) < 3 {
+				continue
+			}
+			handlerArg := trimLuaArgTokens(args[2])
+			if len(handlerArg) > 0 && handlerArg[0].Kind == "keyword" && handlerArg[0].Text == "function" {
+				eventName := stringArgValue(args, 0)
+				if eventName == "" {
+					eventName = "unknown"
+				}
+				warnings = append(warnings, fmt.Sprintf("line %d: inline anonymous function passed to callbacks.Register(\"%s\", ...) — prefer a named local handler unless inline callback style was explicitly requested", tokens[i].Line, eventName))
+			}
+		}
+	}
+	warnings = append(warnings, collectLateFunctionDefinitionWarnings(tokens)...)
+
+	return dedupeStrings(warnings), nil
+}
+
+func collectLateFunctionDefinitionWarnings(tokens []luaToken) []string {
+	functions := collectNamedLuaFunctions(tokens)
+	definitionLines := make(map[string]int, len(functions))
+	for name, functionTokens := range functions {
+		if len(functionTokens) == 0 {
+			continue
+		}
+		definitionLines[name] = functionTokens[0].Line
+	}
+
+	warnings := make([]string, 0)
+	for i := 0; i < len(tokens); i++ {
+		calleeName, _, endIndex, ok := extractSimpleLuaFunctionCall(tokens, i, functions)
+		if !ok {
+			continue
+		}
+		definitionLine, exists := definitionLines[calleeName]
+		if !exists || tokens[i].Line >= definitionLine {
+			i = endIndex
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf("line %d: function '%s' is called before its definition on line %d — prefer defining helpers before the code that uses them for clearer static flow", tokens[i].Line, tokens[i].Text, definitionLine))
+		i = endIndex
+	}
+
+	return dedupeStrings(warnings)
+}
+
 func findIpairsOnFindByClassViolations(content string) []luaPolicyViolation {
 	lines := strings.Split(content, "\n")
 	findByClassAssignRe := regexp.MustCompile(`^\s*(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*entities\s*\.\s*FindByClass\s*\(`)
@@ -529,6 +1100,19 @@ func findCachedEntityWithoutIsValidViolations(content string, tokens []luaToken)
 	}
 
 	return dedupeLuaPolicyViolations(violations)
+}
+
+func dedupeStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func buildFunctionDepthByLine(tokens []luaToken) map[int]int {
