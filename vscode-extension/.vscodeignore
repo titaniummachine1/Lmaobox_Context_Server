@@ -1,0 +1,6 @@
+package-lock.json
+*.vsix
+**/.git/**
+**/.github/**
+**/.vscode/**
+node_modules/@types/**

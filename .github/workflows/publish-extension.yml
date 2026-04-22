@@ -1,0 +1,78 @@
+name: Package Or Publish VS Code Extension
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to package, for example v1.0.0
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  package-extension:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: npm install
+
+      - name: Verify extension version matches release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "No release tag supplied; skipping version check."
+            exit 0
+          fi
+
+          PACKAGE_VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          EXPECTED_TAG="v${PACKAGE_VERSION}"
+          if [ "${RELEASE_TAG}" != "${EXPECTED_TAG}" ]; then
+            echo "Extension version ${PACKAGE_VERSION} does not match release tag ${RELEASE_TAG}."
+            exit 1
+          fi
+
+      - name: Package VSIX
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          mkdir -p dist
+          cd vscode-extension
+          npx --yes @vscode/vsce package -o "../dist/lmaobox-context-${VERSION}.vsix"
+
+      - name: Attach VSIX to GitHub release
+        if: ${{ github.event_name == 'release' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.vsix
+
+      - name: Publish to VS Code Marketplace
+        if: ${{ secrets.VSCE_PAT != '' }}
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          cd vscode-extension
+          npx --yes @vscode/vsce publish --packagePath "../dist/lmaobox-context-${VERSION}.vsix"

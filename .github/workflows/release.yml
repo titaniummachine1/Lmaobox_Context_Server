@@ -1,0 +1,107 @@
+name: Build Runtime Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-runtime:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            asset_name: lmaobox-context-runtime_windows_amd64.zip
+            binary_name: lmaobox-context-server.exe
+          - goos: linux
+            goarch: amd64
+            asset_name: lmaobox-context-runtime_linux_amd64.zip
+            binary_name: lmaobox-context-server
+          - goos: linux
+            goarch: arm64
+            asset_name: lmaobox-context-runtime_linux_arm64.zip
+            binary_name: lmaobox-context-server
+          - goos: darwin
+            goarch: amd64
+            asset_name: lmaobox-context-runtime_darwin_amd64.zip
+            binary_name: lmaobox-context-server
+          - goos: darwin
+            goarch: arm64
+            asset_name: lmaobox-context-runtime_darwin_arm64.zip
+            binary_name: lmaobox-context-server
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build packaged runtime archive
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          ASSET_NAME: ${{ matrix.asset_name }}
+          BINARY_NAME: ${{ matrix.binary_name }}
+        run: |
+          set -euo pipefail
+
+          rm -rf dist runtime-stage
+          mkdir -p dist runtime-stage/automations
+
+          go build -trimpath -o "runtime-stage/${BINARY_NAME}" .
+
+          cp -R smart_context runtime-stage/smart_context
+          cp -R types runtime-stage/types
+
+          if [ -d automations/bin ]; then
+            cp -R automations/bin runtime-stage/automations/bin
+          fi
+
+          cp README.md runtime-stage/README.md
+          cp LICENSE runtime-stage/LICENSE
+
+          (
+            cd runtime-stage
+            zip -r "../dist/${ASSET_NAME}" .
+          )
+
+      - name: Upload runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs: build-runtime
+
+    steps:
+      - name: Download packaged runtimes
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.zip > checksums.txt
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/checksums.txt

@@ -1,0 +1,76 @@
+{
+  "name": "lmaobox-context",
+  "displayName": "Lmaobox Context",
+  "description": "Installs and configures the Lmaobox MCP server from GitHub-built runtime releases.",
+  "version": "1.0.0",
+  "publisher": "titaniummachine1",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "mcp",
+    "lmaobox",
+    "lua",
+    "copilot"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "lmaoboxContext.installOrUpdateRuntime",
+        "title": "Lmaobox Context: Install Or Update Runtime"
+      },
+      {
+        "command": "lmaoboxContext.openRuntimeFolder",
+        "title": "Lmaobox Context: Open Runtime Folder"
+      },
+      {
+        "command": "lmaoboxContext.openBundledDocsFolder",
+        "title": "Lmaobox Context: Open Bundled Docs Folder"
+      }
+    ],
+    "configuration": {
+      "title": "Lmaobox Context",
+      "properties": {
+        "lmaoboxContext.autoConfigureMcp": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically write the MCP server entry into VS Code user settings after the runtime is installed."
+        },
+        "lmaoboxContext.releaseTag": {
+          "type": "string",
+          "default": "",
+          "description": "Override the GitHub release tag to install. Leave empty to use the extension version as v<version>."
+        },
+        "lmaoboxContext.repoOwner": {
+          "type": "string",
+          "default": "titaniummachine1",
+          "description": "GitHub owner used when downloading the packaged runtime release."
+        },
+        "lmaoboxContext.repoName": {
+          "type": "string",
+          "default": "lmaobox-context-protocol",
+          "description": "GitHub repository used when downloading the packaged runtime release."
+        }
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/titaniummachine1/lmaobox-context-protocol.git"
+  },
+  "bugs": {
+    "url": "https://github.com/titaniummachine1/lmaobox-context-protocol/issues"
+  },
+  "homepage": "https://github.com/titaniummachine1/lmaobox-context-protocol",
+  "dependencies": {
+    "extract-zip": "^2.0.1"
+  }
+}

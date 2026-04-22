@@ -1,0 +1,31 @@
+---@meta
+
+-- Entity Props: CFuncSmokeVolume
+-- Auto-generated from: https://lmaobox.net/lua/TF2_props
+-- Last updated: 2025-12-07T00:41:41.662Z
+
+---@class CFuncSmokeVolume
+---@field m_Color1 number
+---@field m_Color2 number
+---@field m_MaterialName string
+---@field m_ParticleDrawWidth number
+---@field m_ParticleSpacingDistance number
+---@field m_DensityRampSpeed number
+---@field m_RotationSpeed number
+---@field m_MovementSpeed number
+---@field m_Density number
+---@field m_spawnflags number
+---@field m_vecMinsPreScaled Vector3
+---@field m_vecMaxsPreScaled Vector3
+---@field m_vecMins Vector3
+---@field m_vecMaxs Vector3
+---@field m_nSolidType number
+---@field m_usSolidFlags number
+---@field m_nSurroundType number
+---@field m_triggerBloat number
+---@field m_bUniformTriggerBloat number
+---@field m_vecSpecifiedSurroundingMinsPreScaled Vector3
+---@field m_vecSpecifiedSurroundingMaxsPreScaled Vector3
+---@field m_vecSpecifiedSurroundingMins Vector3
+---@field m_vecSpecifiedSurroundingMaxs Vector3
+local CFuncSmokeVolume = {}

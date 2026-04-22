@@ -2,6 +2,19 @@
 
 MCP server for Lmaobox Lua context with generated type lookups, curated smart context files, and Lua tooling helpers.
 
+## Marketplace Distribution
+
+This repo now includes a Marketplace-ready VS Code extension wrapper in [vscode-extension](vscode-extension) and a GitHub runtime release workflow in [.github/workflows/release.yml](.github/workflows/release.yml).
+
+The intended flow is:
+
+1. Push a version tag such as `v1.0.0`.
+2. GitHub Actions builds the packaged runtime archives and `checksums.txt`.
+3. Publish the VS Code extension from [vscode-extension](vscode-extension).
+4. The installed extension downloads the matching GitHub-built runtime into VS Code storage and configures the MCP server automatically.
+
+See [docs/MARKETPLACE_RELEASE.md](docs/MARKETPLACE_RELEASE.md) for the full publish flow.
+
 ## Quick Start (Windows)
 
 Local clone bootstrap:
