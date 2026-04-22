@@ -2,7 +2,7 @@
   "name": "lmaobox-context",
   "displayName": "Lmaobox Context",
   "description": "Installs and configures the Lmaobox MCP server from GitHub-built runtime releases.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "titaniummachine1",
   "license": "MIT",
   "engines": {
