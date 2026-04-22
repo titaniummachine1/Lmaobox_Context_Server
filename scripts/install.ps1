@@ -1,104 +1,143 @@
 param(
     [switch]$SkipNodeInstall,
-    [switch]$SkipLuaInstall,
     [switch]$SkipDocsFetch,
-    [switch]$RunWebRefresh
+    [switch]$RunWebRefresh,
+    [switch]$SkipMcpConfig
 )
 
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
-
-function Require-Command {
-    param([string]$Name)
-    if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
-        throw "Required command '$Name' not found in PATH."
-    }
-}
-
-function Resolve-PythonCommand {
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        return @{ Command = "py"; PrefixArgs = @("-3") }
-    }
-
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        return @{ Command = "python"; PrefixArgs = @() }
-    }
-
-    throw "Python 3.9+ is required but was not found."
-}
+$mcpJson = "$env:APPDATA\Code\User\mcp.json"
+$runScript = Join-Path $repoRoot "run-mcp.ps1"
 
 Write-Host "==========================================="
 Write-Host " Lmaobox Context MCP - Bootstrap Installer "
 Write-Host "==========================================="
 Write-Host "Repo root: $repoRoot"
+Write-Host ""
 
-Require-Command git
-$pythonCmd = Resolve-PythonCommand
-
-function Invoke-Python {
-    param(
-        [hashtable]$Python,
-        [string[]]$Args
-    )
-
-    $fullArgs = @()
-    if ($Python.PrefixArgs.Count -gt 0) {
-        $fullArgs += $Python.PrefixArgs
+# ── 1. Go ────────────────────────────────────────────────────────────────────
+Write-Host "[1/4] Checking Go installation..."
+$goCmd = Get-Command go -ErrorAction SilentlyContinue
+if (-not $goCmd) {
+    Write-Host "  Go not found. Attempting install via winget..."
+    winget install GoLang.Go --silent --accept-source-agreements --accept-package-agreements
+    # Refresh PATH
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
+    [System.Environment]::GetEnvironmentVariable("PATH", "User")
+    $goCmd = Get-Command go -ErrorAction SilentlyContinue
+    if (-not $goCmd) {
+        Write-Error "Go install failed. Install manually from: https://go.dev/dl/ then re-run this script."
+        exit 1
     }
-    $fullArgs += $Args
-
-    & $Python.Command @fullArgs
 }
+$goVersion = & go version
+Write-Host "  Go: $goVersion" -ForegroundColor Green
 
+# ── 2. Build binary ──────────────────────────────────────────────────────────
+Write-Host "[2/4] Building MCP server binary..."
 Push-Location $repoRoot
 try {
-    if (-not $SkipLuaInstall) {
-        Write-Host "[setup] Ensuring Lua 5.4+ is available"
-        Invoke-Python -Python $pythonCmd -Args @("automations/install_lua.py")
-    } else {
-        Write-Host "[setup] Skipping Lua setup"
+    & go build -o lmaobox-mcp.exe .
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "go build failed."
+        exit 1
     }
-
-    if (-not $SkipNodeInstall) {
-        Require-Command npm
-        Write-Host "[setup] Installing Node dependencies in automations/"
-        Push-Location "automations"
-        try {
-            if (Test-Path "package-lock.json") {
-                npm ci
-            } else {
-                npm install
-            }
-        } finally {
-            Pop-Location
-        }
-    } else {
-        Write-Host "[setup] Skipping Node dependency install"
-    }
-
-    if (-not $SkipDocsFetch) {
-        Write-Host "[setup] Syncing upstream docs repository"
-        & "$repoRoot\scripts\fetch-upstream-docs.ps1"
-    } else {
-        Write-Host "[setup] Skipping upstream docs fetch"
-    }
-
-    if ($RunWebRefresh) {
-        Require-Command node
-        Write-Host "[setup] Running website crawler refresh"
-        node automations/refresh-docs.js
-    } else {
-        Write-Host "[setup] Website refresh not requested (use -RunWebRefresh)"
-    }
-
-    Write-Host ""
-    Write-Host "[done] Bootstrap complete"
-    Write-Host "[next] Configure MCP server command to:"
-    Write-Host "       python launch_mcp.py"
-    Write-Host "[next] CWD should be:"
-    Write-Host "       $repoRoot"
-} finally {
+}
+finally {
     Pop-Location
 }
+Write-Host "  Built: $repoRoot\lmaobox-mcp.exe" -ForegroundColor Green
+
+# ── 3. Node deps (for bundler + crawler) ────────────────────────────────────
+if (-not $SkipNodeInstall) {
+    Write-Host "[3/4] Installing Node dependencies in automations/..."
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npmCmd) {
+        Write-Host "  npm not found — skipping Node dependencies (bundler may not work)"
+    }
+    else {
+        Push-Location (Join-Path $repoRoot "automations")
+        try {
+            if (Test-Path "package-lock.json") { npm ci } else { npm install }
+        }
+        finally {
+            Pop-Location
+        }
+        Write-Host "  Node dependencies installed." -ForegroundColor Green
+    }
+}
+else {
+    Write-Host "[3/4] Skipping Node dependency install (-SkipNodeInstall)"
+}
+
+# ── 4. mcp.json ──────────────────────────────────────────────────────────────
+if (-not $SkipMcpConfig) {
+    Write-Host "[4/4] Updating MCP config: $mcpJson"
+
+    $runScriptEscaped = $runScript -replace "\\", "\\\\"
+
+    if (Test-Path $mcpJson) {
+        $raw = Get-Content $mcpJson -Raw | ConvertFrom-Json
+    }
+    else {
+        $raw = [PSCustomObject]@{ inputs = @(); servers = [PSCustomObject]@{} }
+    }
+
+    $serverEntry = [PSCustomObject]@{
+        type     = "stdio"
+        command  = "powershell"
+        args     = @("-ExecutionPolicy", "Bypass", "-File", $runScript)
+        disabled = $false
+    }
+
+    if ($raw.servers.PSObject.Properties.Name -contains "lmaobox-context") {
+        $raw.servers."lmaobox-context" = $serverEntry
+        Write-Host "  Updated existing lmaobox-context entry." -ForegroundColor Green
+    }
+    else {
+        Add-Member -InputObject $raw.servers -MemberType NoteProperty -Name "lmaobox-context" -Value $serverEntry
+        Write-Host "  Added lmaobox-context entry." -ForegroundColor Green
+    }
+
+    $raw | ConvertTo-Json -Depth 10 | Set-Content $mcpJson -Encoding UTF8
+    Write-Host "  mcp.json saved." -ForegroundColor Green
+}
+else {
+    Write-Host "[4/4] Skipping mcp.json update (-SkipMcpConfig)"
+}
+
+# ── Optional: docs fetch ─────────────────────────────────────────────────────
+if (-not $SkipDocsFetch) {
+    $fetchScript = Join-Path $scriptDir "fetch-upstream-docs.ps1"
+    if (Test-Path $fetchScript) {
+        Write-Host "[opt] Syncing upstream docs..."
+        & $fetchScript
+    }
+}
+
+if ($RunWebRefresh) {
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCmd) {
+        Write-Host "[opt] Running website crawler refresh..."
+        Push-Location $repoRoot
+        node automations/refresh-docs.js
+        Pop-Location
+    }
+    else {
+        Write-Host "[opt] node not found — skipping web refresh"
+    }
+}
+
+Write-Host ""
+Write-Host "============================================" -ForegroundColor Green
+Write-Host " Install complete!" -ForegroundColor Green
+Write-Host "============================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "MCP server entry point: $runScript"
+Write-Host "Restart VS Code or reload the MCP config to pick up the changes."
+Write-Host ""
+Write-Host "On each startup, run-mcp.ps1 will auto-rebuild if .go sources changed."
+Write-Host "No binary is stored in git — source is always the truth."
