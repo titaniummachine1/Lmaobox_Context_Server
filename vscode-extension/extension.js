@@ -7,10 +7,12 @@ const fs = require('fs/promises');
 const extract = require('extract-zip');
 
 const SERVER_ID = 'lmaobox-context';
+const SUMNEKO_EXTENSION_ID = 'sumneko.lua';
 
 function activate(context) {
     context.subscriptions.push(
         vscode.commands.registerCommand('lmaoboxContext.installOrUpdateRuntime', async () => {
+            await ensureSumnekoLuaLanguageServer({ interactive: true });
             await ensureInstalledAndConfigured(context, { interactive: true, force: true });
         }),
         vscode.commands.registerCommand('lmaoboxContext.openRuntimeFolder', async () => {
@@ -23,10 +25,45 @@ function activate(context) {
         })
     );
 
-    void ensureInstalledAndConfigured(context, { interactive: false, force: false });
+    void bootstrapExtension(context);
 }
 
 function deactivate() { }
+
+async function bootstrapExtension(context) {
+    await ensureSumnekoLuaLanguageServer({ interactive: false });
+    await ensureInstalledAndConfigured(context, { interactive: false, force: false });
+}
+
+async function ensureSumnekoLuaLanguageServer(options) {
+    const alreadyInstalled = vscode.extensions.getExtension(SUMNEKO_EXTENSION_ID);
+    if (alreadyInstalled) {
+        return true;
+    }
+
+    try {
+        await vscode.commands.executeCommand('workbench.extensions.installExtension', SUMNEKO_EXTENSION_ID);
+    } catch (err) {
+        const message = `Failed to auto-install ${SUMNEKO_EXTENSION_ID}. MCP will still run, but Lua diagnostics may be reduced until it is installed.`;
+        console.warn(message, err);
+        if (options.interactive) {
+            void vscode.window.showWarningMessage(message);
+        }
+        return false;
+    }
+
+    const installedNow = vscode.extensions.getExtension(SUMNEKO_EXTENSION_ID);
+    if (!installedNow) {
+        const message = `${SUMNEKO_EXTENSION_ID} install was requested but is not available yet. Restart Extensions if prompted.`;
+        console.warn(message);
+        if (options.interactive) {
+            void vscode.window.showWarningMessage(message);
+        }
+        return false;
+    }
+
+    return true;
+}
 
 async function ensureInstalledAndConfigured(context, options) {
     const releaseTag = getReleaseTag(context);
@@ -163,7 +200,7 @@ async function configureMcp(serverPath, runtimeDir) {
         type: 'stdio',
         command: serverPath,
         cwd: runtimeDir,
-        args: [],
+        args: ['--prefer-lua-ls'],
         disabled: false
     };
 

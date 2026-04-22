@@ -9,6 +9,11 @@
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $exePath = Join-Path $scriptDir "lmaobox-mcp.exe"
+$launchArgs = @($args)
+
+if (-not ($launchArgs -contains "--prefer-lua-ls")) {
+    $launchArgs = @("--prefer-lua-ls") + $launchArgs
+}
 
 function NeedsBuild {
     if (-not (Test-Path $exePath)) {
@@ -24,6 +29,15 @@ function NeedsBuild {
     return $false
 }
 
+function Write-LauncherStatus {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    [Console]::Error.WriteLine($Message)
+}
+
 if (NeedsBuild) {
     $goCmd = Get-Command go -ErrorAction SilentlyContinue
     if (-not $goCmd) {
@@ -31,7 +45,7 @@ if (NeedsBuild) {
         exit 1
     }
 
-    Write-Host "Building lmaobox-mcp.exe from source..." -ForegroundColor Cyan
+    Write-LauncherStatus "Building lmaobox-mcp.exe from source..."
     Push-Location $scriptDir
     try {
         & go build -o lmaobox-mcp.exe .
@@ -43,9 +57,9 @@ if (NeedsBuild) {
     finally {
         Pop-Location
     }
-    Write-Host "Build complete." -ForegroundColor Green
+    Write-LauncherStatus "Build complete."
 }
 
 # Run the MCP server. Stdio is inherited from this process (MCP client connects here).
-& $exePath
+& $exePath @launchArgs
 exit $LASTEXITCODE

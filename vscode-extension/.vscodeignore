@@ -1,6 +1,5 @@
 package-lock.json
 *.vsix
-image.png
 **/.git/**
 **/.github/**
 **/.vscode/**

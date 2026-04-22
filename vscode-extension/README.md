@@ -19,6 +19,16 @@ If you want to force a reinstall or update, run `Lmaobox Context: Install Or Upd
 
 The goal is "install extension and it just works": runtime download, MCP registration, and docs/types availability are handled by the extension.
 
+## Lua Language Server Requirement
+
+This extension requires `sumneko.lua` and attempts to install it automatically during setup.
+
+- If `sumneko.lua` is already installed, setup proceeds immediately.
+- If it is missing, the extension requests installation automatically.
+- If installation cannot complete (offline policy/store issue), MCP still starts, but Lua lint diagnostics may be reduced until `sumneko.lua` is available.
+
+MCP is configured with `--prefer-lua-ls`, so the Lua language server is the primary lint/diagnostic source for predictable workspace-aware checks.
+
 ## Included Lua Snippets
 
 The extension also ships first-party Lua snippets for common Lmaobox scripting patterns, including:

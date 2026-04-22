@@ -2,7 +2,7 @@
   "name": "lmaobox-context",
   "displayName": "Lmaobox Context",
   "description": "Automatically installs and configures the Lmaobox MCP server runtime for VS Code.",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "publisher": "titaniummachine1",
   "license": "MIT",
   "engines": {
@@ -22,6 +22,9 @@
     "onStartupFinished"
   ],
   "main": "./extension.js",
+  "extensionDependencies": [
+    "sumneko.lua"
+  ],
   "contributes": {
     "snippets": [
       {
@@ -77,7 +80,7 @@
     "url": "https://github.com/titaniummachine1/lmaobox-context-protocol/issues"
   },
   "homepage": "https://github.com/titaniummachine1/lmaobox-context-protocol",
-  "icon": "icon.png",
+  "icon": "image.png",
   "dependencies": {
     "extract-zip": "^2.0.1"
   }

@@ -254,6 +254,110 @@ func TestZeroMutationMissingFile(t *testing.T) {
 	}
 }
 
+func TestFormatSearchResultsMarkdownIncludesSnippetSection(t *testing.T) {
+	results := []SmartSearchResult{{
+		Symbol:      "draw.Color",
+		Kind:        "function",
+		Section:     "library",
+		Description: "Sets the current draw color",
+		Signature:   "draw.Color(r, g, b, a)",
+	}}
+	snippetResults := []SmartSearchResult{{
+		Symbol:      "lm.draw",
+		Kind:        "snippet",
+		Section:     "snippet",
+		Description: "Draw callback scaffold",
+		Signature:   "callbacks.Register('Draw', 'Example', function()",
+	}}
+
+	output := formatSearchResultsMarkdown("draw", results, snippetResults, 10)
+
+	if !strings.Contains(output, "### Snippets (secondary matches)") {
+		t.Fatalf("expected snippet section in output, got: %s", output)
+	}
+
+	if !strings.Contains(output, "`lm.draw`") {
+		t.Fatalf("expected snippet prefix in output, got: %s", output)
+	}
+
+	if !strings.Contains(output, "get_smart_context(\"draw.Color\")") {
+		t.Fatalf("expected primary-result next steps in output, got: %s", output)
+	}
+}
+
+func TestFormatSearchResultsMarkdownSnippetOnlyNextSteps(t *testing.T) {
+	snippetResults := []SmartSearchResult{{
+		Symbol:      "lm.createMove",
+		Kind:        "snippet",
+		Section:     "snippet",
+		Description: "CreateMove callback scaffold",
+		Signature:   "callbacks.Register('CreateMove', 'Example', function(cmd)",
+	}}
+
+	output := formatSearchResultsMarkdown("create move", nil, snippetResults, 10)
+
+	if !strings.Contains(output, "Try snippet prefix `lm.createMove` in a Lua file") {
+		t.Fatalf("expected snippet-only next step, got: %s", output)
+	}
+
+	if strings.Contains(output, "get_smart_context") {
+		t.Fatalf("did not expect API next steps when only snippets matched, got: %s", output)
+	}
+}
+
+func TestFormatSearchResultsMarkdownUsesDisplayedPrimaryForNextSteps(t *testing.T) {
+	results := []SmartSearchResult{
+		{
+			Symbol:      "E_TraceLine",
+			Kind:        "function",
+			Section:     "symbol",
+			Description: "Legacy constant helper",
+			Signature:   "function E_TraceLine()",
+		},
+		{
+			Symbol:      "engine.TraceLine",
+			Kind:        "function",
+			Section:     "library",
+			Description: "Primary trace API",
+			Signature:   "function engine.TraceLine(src, dst, mask, shouldHitEntity)",
+		},
+	}
+
+	output := formatSearchResultsMarkdown("trace line", results, nil, 8)
+
+	if !strings.Contains(output, "get_smart_context(\"engine.TraceLine\")") {
+		t.Fatalf("expected next steps to use first displayed primary result, got: %s", output)
+	}
+
+	if strings.Contains(output, "get_smart_context(\"E_TraceLine\")") {
+		t.Fatalf("did not expect next steps to use hidden top-scoring symbol, got: %s", output)
+	}
+}
+
+func TestBuildLuacheckCandidatesIncludesGlobalWindowsPaths(t *testing.T) {
+	candidates := buildLuacheckCandidates(
+		`C:\repo`,
+		`C:\Users\Tester\AppData\Roaming\npm`,
+		`C:\Users\Tester\AppData\Roaming`,
+		`C:\Users\Tester`,
+	)
+
+	joined := strings.Join(candidates, "\n")
+
+	checks := []string{
+		`C:\repo\automations\bin\luacheck\luacheck.exe`,
+		`C:\Users\Tester\AppData\Roaming\npm\luacheck.cmd`,
+		`C:\Users\Tester\AppData\Roaming\npm\luacheck`,
+		`luacheck.cmd`,
+	}
+
+	for _, check := range checks {
+		if !strings.Contains(joined, check) {
+			t.Fatalf("expected candidate list to include %q, got: %s", check, joined)
+		}
+	}
+}
+
 // TestZeroMutationUnregisterWithoutID tests ID-less unregister satisfies kill-switch
 func TestZeroMutationUnregisterWithoutID(t *testing.T) {
 	src := `

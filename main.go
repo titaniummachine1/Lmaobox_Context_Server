@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -21,7 +22,7 @@ import (
 
 const (
 	SERVER_NAME    = "LmaoboxContext"
-	SERVER_VERSION = "1.0.0"
+	SERVER_VERSION = "1.0.4"
 )
 
 type BundleRequest struct {
@@ -45,7 +46,20 @@ type BundleContext struct {
 	Stack       map[string]bool
 }
 
+type luacheckState struct {
+	mu         sync.RWMutex
+	ready      bool
+	installing bool
+	status     string
+	lastError  string
+}
+
+var globalLuacheckState = &luacheckState{}
+var preferLuaLanguageServer bool
+
 func main() {
+	preferLuaLanguageServer = hasArg("--prefer-lua-ls") || strings.EqualFold(strings.TrimSpace(os.Getenv("LMAOBOX_LINT_PROVIDER")), "lua-ls")
+
 	// Ensure dependencies are installed before starting server
 	if err := ensureDependencies(); err != nil {
 		log.Fatalf("Failed to initialize dependencies: %v", err)
@@ -220,10 +234,19 @@ func handleLuacheck(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 			return mcp.NewToolResultError(fmt.Sprintf("warning scan failed: %v", err)), nil
 		}
 		if len(advisories) > 0 {
-			return mcp.NewToolResultText(formatLuaValidationSuccessWithWarnings(advisories)), nil
+			result := formatLuaValidationSuccessWithWarnings(advisories)
+			if statusText := luacheckNotReadyStatusText(); statusText != "" {
+				result = result + "\n\n" + statusText
+			}
+			return mcp.NewToolResultText(result), nil
 		}
 
-		return mcp.NewToolResultText("✓ Lua syntax is valid and passed Zero-Mutation callback policy"), nil
+		result := "✓ Lua syntax is valid and passed Zero-Mutation callback policy"
+		if statusText := luacheckNotReadyStatusText(); statusText != "" {
+			result = result + "\n\n" + statusText
+		}
+
+		return mcp.NewToolResultText(result), nil
 	}
 }
 
@@ -1479,6 +1502,8 @@ func formatSearchResultsMarkdown(query string, results []SmartSearchResult, snip
 		}
 	}
 
+	primarySuggestion, hasPrimarySuggestion := firstDisplayedPrimaryResult(results, sectionOrder)
+
 	for _, sec := range sectionOrder {
 		rows, ok := bySection[sec]
 		if !ok || len(rows) == 0 {
@@ -1532,8 +1557,8 @@ func formatSearchResultsMarkdown(query string, results []SmartSearchResult, snip
 	}
 
 	// Suggest next steps based on top result
-	if len(results) > 0 {
-		top := results[0]
+	if hasPrimarySuggestion {
+		top := primarySuggestion
 		sb.WriteString("---\n")
 		sb.WriteString("**Next steps:**\n")
 		sb.WriteString(fmt.Sprintf("- Full docs & examples: `get_smart_context(\"%s\")` \n", top.Symbol))
@@ -1550,6 +1575,27 @@ func formatSearchResultsMarkdown(query string, results []SmartSearchResult, snip
 	}
 
 	return sb.String()
+}
+
+func firstDisplayedPrimaryResult(results []SmartSearchResult, sectionOrder []string) (SmartSearchResult, bool) {
+	if len(results) == 0 {
+		return SmartSearchResult{}, false
+	}
+
+	for _, sec := range sectionOrder {
+		for _, result := range results {
+			resultSection := result.Section
+			if resultSection == "" {
+				resultSection = "symbol"
+			}
+
+			if resultSection == sec {
+				return result, true
+			}
+		}
+	}
+
+	return results[0], true
 }
 
 func sectionDisplayName(section string) string {
@@ -1970,12 +2016,6 @@ func ensureDependencies() error {
 	luacPath := findLuac()
 	luacheckPath := findLuacheck()
 
-	// If both are available, we're good
-	if luacPath != "" && luacheckPath != "" {
-		log.Printf("✓ Dependencies satisfied: Lua compiler found at %s, luacheck found at %s", luacPath, luacheckPath)
-		return nil
-	}
-
 	if luacPath == "" {
 		log.Printf("Lua compiler not found, attempting auto-install via choco...")
 		if err := installLuac(); err != nil {
@@ -1983,20 +2023,118 @@ func ensureDependencies() error {
 				"Please install manually from: https://luabinaries.sourceforge.net/\n"+
 				"Or use: choco install lua (if you have Chocolatey)", err)
 		}
+		luacPath = findLuac()
+		if luacPath == "" {
+			return fmt.Errorf("Lua compiler install completed but luac is still not discoverable")
+		}
 		log.Printf("✓ Lua compiler installed successfully")
 	}
 
-	if luacheckPath == "" {
-		log.Printf("luacheck not found, attempting auto-install...")
-		if err := installLuacheck(""); err != nil {
-			log.Printf("⚠ luacheck auto-install failed (non-critical): %v", err)
-			// Don't fail here - luacheck is optional for MCP functionality
-		} else {
-			log.Printf("✓ luacheck installed successfully")
-		}
+	if luacheckPath != "" {
+		updateLuacheckState(true, false, "ready", "")
+		log.Printf("✓ Dependencies satisfied: Lua compiler found at %s, luacheck found at %s", luacPath, luacheckPath)
+		return nil
 	}
 
+	if preferLuaLanguageServer {
+		log.Printf("luacheck bootstrap disabled: prefer Lua language server diagnostics (--prefer-lua-ls)")
+		updateLuacheckState(false, false, "disabled-lua-ls", "")
+		return nil
+	}
+
+	log.Printf("luacheck not found at startup. Continuing without lint until bootstrap finishes.")
+	updateLuacheckState(false, false, "queued", "")
+	requestLuacheckBootstrap()
+
 	return nil
+}
+
+func requestLuacheckBootstrap() {
+	globalLuacheckState.mu.Lock()
+	if globalLuacheckState.installing || globalLuacheckState.ready {
+		globalLuacheckState.mu.Unlock()
+		return
+	}
+	globalLuacheckState.installing = true
+	globalLuacheckState.status = "starting install"
+	globalLuacheckState.lastError = ""
+	globalLuacheckState.mu.Unlock()
+
+	go runLuacheckBootstrap()
+}
+
+func runLuacheckBootstrap() {
+	log.Printf("luacheck bootstrap started in background")
+
+	updateLuacheckState(false, true, "installing", "")
+	if err := installLuacheck(""); err != nil {
+		updateLuacheckState(false, false, "failed", err.Error())
+		log.Printf("⚠ luacheck bootstrap failed: %v", err)
+		return
+	}
+
+	luacheckPath := findLuacheck()
+	if luacheckPath == "" {
+		errText := "install finished but executable is still not discoverable"
+		updateLuacheckState(false, false, "failed", errText)
+		log.Printf("⚠ luacheck bootstrap failed: %s", errText)
+		return
+	}
+
+	updateLuacheckState(true, false, "ready", "")
+	log.Printf("✓ luacheck bootstrap complete: %s", luacheckPath)
+}
+
+func updateLuacheckState(ready bool, installing bool, status string, lastError string) {
+	globalLuacheckState.mu.Lock()
+	globalLuacheckState.ready = ready
+	globalLuacheckState.installing = installing
+	globalLuacheckState.status = status
+	globalLuacheckState.lastError = lastError
+	globalLuacheckState.mu.Unlock()
+}
+
+func luacheckNotReadyStatusText() string {
+	globalLuacheckState.mu.RLock()
+	ready := globalLuacheckState.ready
+	installing := globalLuacheckState.installing
+	status := globalLuacheckState.status
+	lastError := globalLuacheckState.lastError
+	globalLuacheckState.mu.RUnlock()
+
+	if ready || findLuacheck() != "" {
+		if !ready {
+			updateLuacheckState(true, false, "ready", "")
+		}
+		return ""
+	}
+
+	if status == "disabled-lua-ls" {
+		return "ℹ luacheck bootstrap is disabled in prefer-Lua-LS mode. Use the VS Code Lua extension diagnostics for lint warnings; MCP syntax and policy checks remain active."
+	}
+
+	if !installing {
+		requestLuacheckBootstrap()
+	}
+
+	if lastError != "" {
+		return fmt.Sprintf("⚠ luacheck is not ready yet (status: %s). Last bootstrap error: %s", status, lastError)
+	}
+
+	if status == "" {
+		status = "installing"
+	}
+
+	return fmt.Sprintf("⚠ luacheck is not ready yet (status: %s). Syntax and policy checks are available; lint checks will activate once bootstrap finishes.", status)
+}
+
+func hasArg(target string) bool {
+	for _, arg := range os.Args[1:] {
+		if arg == target {
+			return true
+		}
+	}
+	return false
 }
 
 func installLuac() error {
@@ -2015,16 +2153,27 @@ func installLuac() error {
 }
 
 func installLuacheck(_ string) error {
-	// Strategy 1: npm install -g luacheck
-	if _, err := exec.LookPath("npm"); err == nil {
-		log.Printf("Trying: npm install -g luacheck")
-		cmd := exec.Command("npm", "install", "-g", "luacheck")
-		out, err := cmd.CombinedOutput()
-		log.Printf("npm output:\n%s", string(out))
-		if err == nil {
-			return nil
+	if path := findLuacheck(); path != "" {
+		log.Printf("luacheck already available at %s", path)
+		return nil
+	}
+
+	// Strategy 1: use luarocks directly when available
+	if err := installLuacheckViaLuaRocks(); err == nil {
+		return nil
+	}
+
+	// Strategy 2: install Lua (includes luarocks) via winget, then retry luarocks
+	if _, err := exec.LookPath("winget"); err == nil {
+		log.Printf("Trying: winget install DEVCOM.Lua")
+		cmd := exec.Command("winget", "install", "--id", "DEVCOM.Lua", "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements")
+		out, installErr := cmd.CombinedOutput()
+		log.Printf("winget output:\n%s", string(out))
+		if installErr == nil {
+			if err := installLuacheckViaLuaRocks(); err == nil {
+				return nil
+			}
 		}
-		log.Printf("npm install failed: %v, trying next method...", err)
 	}
 
 	// Strategy 3: pip install luacheck
@@ -2034,14 +2183,132 @@ func installLuacheck(_ string) error {
 			cmd := exec.Command(pip, "install", "luacheck")
 			out, err := cmd.CombinedOutput()
 			log.Printf("%s output:\n%s", pip, string(out))
-			if err == nil {
+			if err == nil && findLuacheck() != "" {
 				return nil
 			}
 			log.Printf("%s install failed: %v", pip, err)
 		}
 	}
 
-	return fmt.Errorf("all install methods failed. Install manually: npm install -g luacheck  OR  pip install luacheck")
+	return fmt.Errorf("all install methods failed. Install manually with LuaRocks: luarocks install luacheck")
+}
+
+func installLuacheckViaLuaRocks() error {
+	compilerPath := findGCCCompiler()
+	if compilerPath == "" {
+		if err := installCompilerToolchain(); err == nil {
+			compilerPath = findGCCCompiler()
+		}
+	}
+
+	luarocksCandidates := []string{"luarocks", "luarocks.exe", "luarocks.bat"}
+	if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+		luarocksCandidates = append(luarocksCandidates,
+			filepath.Join(localAppData, "Programs", "Lua", "bin", "luarocks.exe"),
+			filepath.Join(localAppData, "Programs", "Lua", "bin", "luarocks.bat"),
+		)
+	}
+
+	for _, luarocks := range uniqueStrings(luarocksCandidates) {
+		if _, err := exec.LookPath(luarocks); err != nil {
+			if filepath.IsAbs(luarocks) {
+				if _, statErr := os.Stat(luarocks); statErr == nil {
+					// absolute path exists, continue to execution
+				} else {
+					continue
+				}
+			} else {
+				continue
+			}
+		}
+
+		log.Printf("Trying: %s install luacheck", luarocks)
+		cmd := exec.Command(luarocks, "install", "luacheck")
+		if compilerPath != "" {
+			cmd.Env = append(os.Environ(), "CC="+compilerPath)
+		}
+		out, err := cmd.CombinedOutput()
+		log.Printf("%s output:\n%s", luarocks, string(out))
+		if err == nil && findLuacheck() != "" {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("luarocks not available or luacheck install failed")
+}
+
+func installCompilerToolchain() error {
+	if _, err := exec.LookPath("winget"); err != nil {
+		return fmt.Errorf("winget unavailable")
+	}
+
+	log.Printf("Trying: winget install BrechtSanders.WinLibs.POSIX.UCRT")
+	cmd := exec.Command("winget", "install", "--id", "BrechtSanders.WinLibs.POSIX.UCRT", "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements")
+	out, err := cmd.CombinedOutput()
+	log.Printf("winget compiler output:\n%s", string(out))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func findGCCCompiler() string {
+	for _, candidate := range []string{"x86_64-w64-mingw32-gcc", "x86_64-w64-mingw32-gcc.exe", "gcc", "gcc.exe"} {
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path
+		}
+	}
+
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData == "" {
+		return ""
+	}
+
+	roots := []string{
+		filepath.Join(localAppData, "Microsoft", "WinGet", "Packages"),
+		filepath.Join(localAppData, "Programs"),
+	}
+
+	targets := map[string]bool{
+		"x86_64-w64-mingw32-gcc.exe": true,
+		"gcc.exe":                    true,
+	}
+
+	for _, root := range roots {
+		path := findFirstFileByName(root, targets)
+		if path != "" {
+			return path
+		}
+	}
+
+	return ""
+}
+
+func findFirstFileByName(root string, fileNames map[string]bool) string {
+	if root == "" {
+		return ""
+	}
+	if _, err := os.Stat(root); err != nil {
+		return ""
+	}
+
+	found := ""
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if fileNames[strings.ToLower(d.Name())] {
+			found = path
+			return fs.SkipAll
+		}
+		return nil
+	})
+
+	return found
 }
 
 func findLuac() string {
@@ -2072,12 +2339,7 @@ func findLuac() string {
 }
 
 func findLuacheck() string {
-	candidates := []string{
-		filepath.Join(filepath.Dir(os.Args[0]), "automations", "bin", "luacheck", "luacheck.exe"),
-		filepath.Join(filepath.Dir(os.Args[0]), "automations", "bin", "luacheck", "luacheck"),
-		"luacheck",
-		"luacheck.exe",
-	}
+	candidates := buildLuacheckCandidates(filepath.Dir(os.Args[0]), getNpmGlobalPrefix(), os.Getenv("APPDATA"), os.Getenv("USERPROFILE"))
 
 	for _, candidate := range candidates {
 		if filepath.IsAbs(candidate) {
@@ -2092,4 +2354,102 @@ func findLuacheck() string {
 	}
 
 	return ""
+}
+
+func buildLuacheckCandidates(execDir, npmPrefix, appData, userProfile string) []string {
+	candidates := []string{
+		filepath.Join(execDir, "automations", "bin", "luacheck", "luacheck.exe"),
+		filepath.Join(execDir, "automations", "bin", "luacheck", "luacheck"),
+		filepath.Join(execDir, "automations", "bin", "luacheck", "luacheck.bat"),
+	}
+
+	if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+		candidates = append(candidates,
+			filepath.Join(localAppData, "Programs", "Lua", "bin", "luacheck.bat"),
+			filepath.Join(localAppData, "Programs", "Lua", "bin", "luacheck.exe"),
+		)
+	}
+
+	if npmPrefix != "" {
+		candidates = append(candidates,
+			filepath.Join(npmPrefix, "luacheck.cmd"),
+			filepath.Join(npmPrefix, "luacheck.exe"),
+			filepath.Join(npmPrefix, "luacheck"),
+			filepath.Join(npmPrefix, "bin", "luacheck"),
+			filepath.Join(npmPrefix, "bin", "luacheck.cmd"),
+		)
+	}
+
+	if appData != "" {
+		candidates = append(candidates,
+			filepath.Join(appData, "npm", "luacheck.cmd"),
+			filepath.Join(appData, "npm", "luacheck"),
+			filepath.Join(appData, "luarocks", "bin", "luacheck.bat"),
+			filepath.Join(appData, "luarocks", "bin", "luacheck.exe"),
+		)
+	}
+
+	if userProfile != "" {
+		candidates = append(candidates,
+			filepath.Join(userProfile, "AppData", "Roaming", "npm", "luacheck.cmd"),
+			filepath.Join(userProfile, "AppData", "Roaming", "npm", "luacheck"),
+			filepath.Join(userProfile, "scoop", "apps", "luarocks", "current", "luarocks.exe"),
+			filepath.Join(userProfile, "scoop", "apps", "luarocks", "current", "luarocks.bat"),
+			filepath.Join(userProfile, "scoop", "apps", "luarocks", "current", "luacheck.bat"),
+			filepath.Join(userProfile, "AppData", "Roaming", "luarocks", "bin", "luacheck.bat"),
+			filepath.Join(userProfile, "AppData", "Roaming", "luarocks", "bin", "luacheck.exe"),
+		)
+	}
+
+	for _, pf := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")} {
+		if pf == "" {
+			continue
+		}
+		candidates = append(candidates,
+			filepath.Join(pf, "Lua", "bin", "luacheck.bat"),
+			filepath.Join(pf, "Lua", "bin", "luacheck.exe"),
+		)
+	}
+
+	candidates = append(candidates,
+		"luacheck",
+		"luacheck.exe",
+		"luacheck.cmd",
+		"luacheck.bat",
+	)
+
+	return uniqueStrings(candidates)
+}
+
+func getNpmGlobalPrefix() string {
+	for _, npm := range []string{"npm.cmd", "npm"} {
+		if _, err := exec.LookPath(npm); err != nil {
+			continue
+		}
+
+		out, err := exec.Command(npm, "prefix", "-g").Output()
+		if err != nil {
+			continue
+		}
+
+		prefix := strings.TrimSpace(string(out))
+		if prefix != "" {
+			return prefix
+		}
+	}
+
+	return ""
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+	}
+	return unique
 }
