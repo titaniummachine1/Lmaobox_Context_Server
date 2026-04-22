@@ -22,7 +22,7 @@ import (
 
 const (
 	SERVER_NAME    = "LmaoboxContext"
-	SERVER_VERSION = "1.0.4"
+	SERVER_VERSION = "1.0.6"
 )
 
 type BundleRequest struct {

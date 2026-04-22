@@ -187,8 +187,17 @@ async function ensureBundledAssets(runtimeDir, context) {
 
     const bundledSnippets = path.join(context.extensionPath, 'snippets');
     const runtimeSnippets = path.join(runtimeDir, 'snippets');
-    if (!(await pathExists(runtimeSnippets)) && (await pathExists(bundledSnippets))) {
-        await fs.cp(bundledSnippets, runtimeSnippets, { recursive: true });
+    if (await pathExists(bundledSnippets)) {
+        await fs.mkdir(runtimeSnippets, { recursive: true });
+        const snippetFiles = await fs.readdir(bundledSnippets, { withFileTypes: true });
+        for (const entry of snippetFiles) {
+            if (!entry.isFile()) {
+                continue;
+            }
+            const sourceFile = path.join(bundledSnippets, entry.name);
+            const targetFile = path.join(runtimeSnippets, entry.name);
+            await fs.copyFile(sourceFile, targetFile);
+        }
     }
 }
 
