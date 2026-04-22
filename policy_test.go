@@ -509,3 +509,89 @@ local bones = entity:SetupBones(0x7ff00, globals.CurTime())
 		}
 	}
 }
+
+func TestIpairsOnFindByClassVariableRejected(t *testing.T) {
+	src := `
+local players = entities.FindByClass("CTFPlayer")
+for _, player in ipairs(players) do
+    print(player)
+end
+`
+	path := writeTempLua(t, "ipairs_findbyclass_var", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	found := false
+	for _, v := range violations {
+		if strings.Contains(v.Message, "FindByClass() and may be sparse") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected ipairs FindByClass violation, got: %+v", violations)
+	}
+}
+
+func TestDirectIpairsOnFindByClassRejected(t *testing.T) {
+	src := `
+for _, player in ipairs(entities.FindByClass("CTFPlayer")) do
+    print(player)
+end
+`
+	path := writeTempLua(t, "ipairs_findbyclass_direct", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	found := false
+	for _, v := range violations {
+		if strings.Contains(v.Message, "entities.FindByClass() returns a sparse entity table") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected direct ipairs FindByClass violation, got: %+v", violations)
+	}
+}
+
+func TestPairsOnFindByClassAllowed(t *testing.T) {
+	src := `
+local players = entities.FindByClass("CTFPlayer")
+for _, player in pairs(players) do
+    print(player)
+end
+`
+	path := writeTempLua(t, "pairs_findbyclass_ok", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	for _, v := range violations {
+		if strings.Contains(v.Message, "FindByClass") && strings.Contains(v.Message, "sparse") {
+			t.Fatalf("unexpected FindByClass iteration violation: %+v", violations)
+		}
+	}
+}
+
+func TestIpairsAllowedAfterFindByClassTableModified(t *testing.T) {
+	src := `
+local players = entities.FindByClass("CTFPlayer")
+table.sort(players, function(a, b) return a:GetIndex() < b:GetIndex() end)
+for _, player in ipairs(players) do
+    print(player)
+end
+`
+	path := writeTempLua(t, "ipairs_findbyclass_modified", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	for _, v := range violations {
+		if strings.Contains(v.Message, "FindByClass") && strings.Contains(v.Message, "sparse") {
+			t.Fatalf("modified table should not trigger FindByClass ipairs rule: %+v", violations)
+		}
+	}
+}
