@@ -52,6 +52,7 @@ type LboxMutationPolicy struct {
 	ForbidCollectGarbage       bool // collectgarbage() masks leaks, never allowed
 	ForbidRequireInFunction    bool // require() inside a function causes memory leaks
 	ForbidGlobalTable          bool // _G usage forbidden; use G module instead
+	ForbidCreateFontInFunction bool // draw.CreateFont inside a function creates irremovable fonts every call, crashing the game
 }
 
 type luaPolicyViolation struct {
@@ -81,6 +82,7 @@ var defaultLboxMutationPolicy = LboxMutationPolicy{
 	ForbidCollectGarbage:       true,
 	ForbidRequireInFunction:    true,
 	ForbidGlobalTable:          true,
+	ForbidCreateFontInFunction: true,
 }
 
 func main() {
@@ -1014,6 +1016,22 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 				Line:    tok.Line,
 				Message: "CRITICAL: _G usage is forbidden — use the G module for shared state instead",
 			})
+		}
+
+		// draw.CreateFont inside a function — each call creates a permanent font handle
+		// that cannot be removed; calling this per-frame or in a callback floods VGUI
+		// font memory and eventually crashes the game.
+		if policy.ForbidCreateFontInFunction && strings.EqualFold(tok.Text, "draw") && functionDepth2 > 0 {
+			// look ahead: draw . CreateFont (
+			if i+3 < len(tokens) &&
+				tokens[i+1].Kind == "symbol" && tokens[i+1].Text == "." &&
+				strings.EqualFold(tokens[i+2].Text, "CreateFont") &&
+				tokens[i+3].Kind == "symbol" && tokens[i+3].Text == "(" {
+				violations = append(violations, luaPolicyViolation{
+					Line:    tok.Line,
+					Message: "CRITICAL: draw.CreateFont inside a function creates a permanent irremovable font on every call — move it to module-level (depth 0) and cache the handle",
+				})
+			}
 		}
 	}
 

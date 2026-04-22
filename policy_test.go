@@ -311,3 +311,53 @@ callbacks.register("Draw", "MyLoop", function() end)
 		t.Fatalf("expected Kill-Switch violation (comment was stripped), got: %+v", violations)
 	}
 }
+
+func TestCreateFontInsideFunction(t *testing.T) {
+	// draw.CreateFont inside a function creates a permanent font handle on every call.
+	// This floods VGUI font memory and crashes the game.
+	src := `
+local font
+
+local function setupFont()
+    font = draw.CreateFont("Arial", 14, 400)
+end
+`
+	path := writeTempLua(t, "createfont_in_fn", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	found := false
+	for _, v := range violations {
+		if strings.Contains(v.Message, "draw.CreateFont") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected draw.CreateFont violation, got: %+v", violations)
+	}
+}
+
+func TestCreateFontAtDepthZeroAllowed(t *testing.T) {
+	// draw.CreateFont at module level (depth 0) is the correct pattern — cache the handle once.
+	src := `
+local font = draw.CreateFont("Arial", 14, 400)
+
+callbacks.unregister("Draw", "MyDraw")
+callbacks.register("Draw", "MyDraw", function()
+    draw.SetFont(font)
+    draw.Text(10, 10, "hello")
+end)
+`
+	path := writeTempLua(t, "createfont_depth0", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	for _, v := range violations {
+		if strings.Contains(v.Message, "draw.CreateFont") {
+			t.Fatalf("unexpected draw.CreateFont violation at depth 0: %s", v.Message)
+		}
+	}
+}
