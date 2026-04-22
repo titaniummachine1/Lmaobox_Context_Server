@@ -2,12 +2,22 @@
 
 This extension installs the Lmaobox MCP runtime from GitHub Releases into VS Code storage and writes the MCP server entry automatically.
 
+## Quick Start
+
+1. Install the extension from the VS Code Marketplace.
+2. Wait a few seconds after VS Code startup. The extension activates on startup and installs/configures the MCP runtime automatically.
+3. Open Copilot Chat and use MCP tools. No manual server install is required in the normal case.
+
+If you want to force a reinstall or update, run `Lmaobox Context: Install Or Update Runtime` from the Command Palette.
+
 ## What it does
 
 1. Downloads the runtime archive matching the extension version from GitHub Releases.
 2. Verifies the archive with the published `checksums.txt` file.
 3. Extracts the server binary plus `smart_context`, `types`, and bundled automation assets into the extension runtime folder.
 4. Writes the `modelContextProtocol.servers.lmaobox-context` entry into user settings.
+
+The goal is "install extension and it just works": runtime download, MCP registration, and docs/types availability are handled by the extension.
 
 ## Expected release assets
 
@@ -31,3 +41,25 @@ The extension expects these files on the GitHub release matching the extension v
 - `Lmaobox Context: Install Or Update Runtime`
 - `Lmaobox Context: Open Runtime Folder`
 - `Lmaobox Context: Open Bundled Docs Folder`
+
+## Configuration
+
+- `lmaoboxContext.autoConfigureMcp` (default: `true`)
+: Automatically writes/updates the MCP server entry in VS Code user settings.
+- `lmaoboxContext.releaseTag` (default: empty)
+: Override runtime tag. Empty means `v<extension-version>`.
+- `lmaoboxContext.repoOwner` / `lmaoboxContext.repoName`
+: Override GitHub source for runtime release assets.
+
+## Troubleshooting
+
+If MCP does not start or tools are missing:
+
+1. Run `Lmaobox Context: Install Or Update Runtime`.
+2. Run `Lmaobox Context: Open Runtime Folder` and verify files exist:
+: `lmaobox-context-server(.exe)`, `types`, and `smart_context`.
+3. Open VS Code settings JSON and verify:
+: `modelContextProtocol.servers.lmaobox-context` exists and points to the runtime executable.
+4. Restart VS Code after reinstall.
+
+If GitHub release assets are unavailable for your version, set `lmaoboxContext.releaseTag` temporarily to a valid tag.
