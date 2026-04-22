@@ -70,6 +70,7 @@
     "url": "https://github.com/titaniummachine1/lmaobox-context-protocol/issues"
   },
   "homepage": "https://github.com/titaniummachine1/lmaobox-context-protocol",
+  "icon": "icon.png",
   "dependencies": {
     "extract-zip": "^2.0.1"
   }
