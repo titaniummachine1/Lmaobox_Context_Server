@@ -9,7 +9,7 @@ The MCP `bundle` tool was **hardcoded to only work within the Lmaobox_Context_Se
 3. All project paths were relative to the MCP server repo root
 4. The CWD was always the MCP server repo
 
-This completely broke the tool for any workspace that wasn't this dspecific repo.
+This completely broke the tool for any workspace that wasn't this specific repo..
 
 ## Solution
 
