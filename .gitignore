@@ -36,6 +36,10 @@ data/tmp/
 data/upstream_docs/lbox-src-docs/
 data/upstream_docs/last-sync.txt
 
+# Go binaries and editor backup files
+*.exe
+*~
+
 # Keep placeholder markers
 !**/.gitkeep
 
