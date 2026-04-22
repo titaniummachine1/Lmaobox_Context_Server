@@ -74,6 +74,10 @@ jobs:
             cp -R automations/bin runtime-stage/automations/bin
           fi
 
+          if [ -d vscode-extension/snippets ]; then
+            cp -R vscode-extension/snippets runtime-stage/snippets
+          fi
+
           cp README.md runtime-stage/README.md
           cp LICENSE runtime-stage/LICENSE
 

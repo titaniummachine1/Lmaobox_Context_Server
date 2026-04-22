@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -1313,11 +1314,73 @@ func findSmartContext(symbol string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	snippetAppendix, snippetErr := buildSnippetAppendix(symbol)
+	if snippetErr != nil {
+		return "", snippetErr
+	}
 	if foundContent != "" {
-		return combineTypeAndSmartContext(typeInfo, foundContent), nil
+		combined := combineTypeAndSmartContext(typeInfo, foundContent)
+		if snippetAppendix != "" {
+			combined = strings.Join([]string{combined, "---", snippetAppendix}, "\n\n")
+		}
+		return combined, nil
+	}
+
+	if typeInfo != "" && snippetAppendix != "" {
+		return strings.Join([]string{typeInfo, "---", snippetAppendix}, "\n\n"), nil
+	}
+	if snippetAppendix != "" {
+		return snippetAppendix, nil
 	}
 
 	return "", nil
+}
+
+func buildSnippetAppendix(symbol string) (string, error) {
+	candidates, err := loadSnippetCandidates()
+	if err != nil {
+		return "", err
+	}
+	if len(candidates) == 0 {
+		return "", nil
+	}
+
+	queryLower := strings.ToLower(strings.TrimSpace(symbol))
+	tokens := strings.Fields(strings.ReplaceAll(strings.ReplaceAll(queryLower, ".", " "), "_", " "))
+	if len(tokens) == 0 {
+		tokens = strings.Fields(queryLower)
+	}
+
+	matched := make([]smartCandidate, 0)
+	for _, c := range candidates {
+		c.Score = scoreSnippetCandidate(queryLower, tokens, c.combinedLower, strings.ToLower(c.Symbol))
+		if c.Score > 20 {
+			matched = append(matched, c)
+		}
+	}
+
+	if len(matched) == 0 {
+		return "", nil
+	}
+
+	sort.Slice(matched, func(i, j int) bool {
+		return matched[i].Score > matched[j].Score
+	})
+	if len(matched) > 3 {
+		matched = matched[:3]
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Related Snippets\n\n")
+	for _, match := range matched {
+		sb.WriteString(fmt.Sprintf("- Prefix `%s`: %s\n", match.Symbol, match.Description))
+		if match.Signature != "" {
+			sb.WriteString(fmt.Sprintf("  - Preview: `%s`\n", match.Signature))
+		}
+	}
+
+	return strings.TrimSpace(sb.String()), nil
 }
 
 func max(a, b int) int {
@@ -1345,6 +1408,12 @@ type SmartSearchResult struct {
 	Signature   string  `json:"signature,omitempty"`
 }
 
+type snippetFileEntry struct {
+	Prefix      interface{} `json:"prefix"`
+	Body        interface{} `json:"body"`
+	Description string      `json:"description"`
+}
+
 type smartCandidate struct {
 	SmartSearchResult
 	combinedLower string
@@ -1367,22 +1436,22 @@ func handleSmartSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 		}
 	}
 
-	results, err := smartSearch(query, limit)
+	results, snippetResults, err := smartSearch(query, limit)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Search failed: %v", err)), nil
 	}
 
-	output := formatSearchResultsMarkdown(query, results, limit)
+	output := formatSearchResultsMarkdown(query, results, snippetResults, limit)
 	return mcp.NewToolResultText(output), nil
 }
 
-func formatSearchResultsMarkdown(query string, results []SmartSearchResult, limit int) string {
+func formatSearchResultsMarkdown(query string, results []SmartSearchResult, snippetResults []SmartSearchResult, limit int) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("## smart_search: `%s`\n", query))
-	sb.WriteString(fmt.Sprintf("_Returned %d of up to %d results_\n\n", len(results), limit))
+	sb.WriteString(fmt.Sprintf("_Returned %d primary results of up to %d_\n\n", len(results), limit))
 
-	if len(results) == 0 {
+	if len(results) == 0 && len(snippetResults) == 0 {
 		sb.WriteString("No matches found. Try broader terms or check spelling.\n")
 		sb.WriteString("\n**Tip:** Use `smart_search` with simpler keywords, e.g. `health`, `trace`, `draw`")
 		return sb.String()
@@ -1439,6 +1508,29 @@ func formatSearchResultsMarkdown(query string, results []SmartSearchResult, limi
 		sb.WriteString("\n")
 	}
 
+	if len(snippetResults) > 0 {
+		sb.WriteString("### Snippets (secondary matches)\n")
+		sb.WriteString("| Prefix | Description | Template Preview |\n")
+		sb.WriteString("|---|---|---|\n")
+
+		for _, r := range snippetResults {
+			desc := r.Description
+			if len(desc) > 90 {
+				desc = desc[:87] + "..."
+			}
+			sig := r.Signature
+			if len(sig) > 70 {
+				sig = sig[:67] + "..."
+			}
+			desc = strings.ReplaceAll(desc, "|", `\|`)
+			sig = strings.ReplaceAll(sig, "|", `\|`)
+			sb.WriteString(fmt.Sprintf("| `%s` | %s | %s |\n", r.Symbol, desc, sig))
+		}
+
+		sb.WriteString("\n")
+		sb.WriteString("_Snippet matches are a secondary pass after formal type/API matches._\n\n")
+	}
+
 	// Suggest next steps based on top result
 	if len(results) > 0 {
 		top := results[0]
@@ -1449,6 +1541,12 @@ func formatSearchResultsMarkdown(query string, results []SmartSearchResult, limi
 		if len(results) > 1 {
 			sb.WriteString(fmt.Sprintf("- More results: re-run `smart_search` with `limit` > %d\n", limit))
 		}
+	} else if len(snippetResults) > 0 {
+		top := snippetResults[0]
+		sb.WriteString("---\n")
+		sb.WriteString("**Next steps:**\n")
+		sb.WriteString(fmt.Sprintf("- Try snippet prefix `%s` in a Lua file\n", top.Symbol))
+		sb.WriteString("- Re-run `smart_search` with the related API symbol or library for formal docs\n")
 	}
 
 	return sb.String()
@@ -1464,6 +1562,8 @@ func sectionDisplayName(section string) string {
 		return "Entity Properties"
 	case "constants":
 		return "Constants / Enums"
+	case "snippet":
+		return "Snippets"
 	case "symbol":
 		return "Other Symbols"
 	default:
@@ -1471,7 +1571,7 @@ func sectionDisplayName(section string) string {
 	}
 }
 
-func smartSearch(query string, limit int) ([]SmartSearchResult, error) {
+func smartSearch(query string, limit int) ([]SmartSearchResult, []SmartSearchResult, error) {
 	queryLower := strings.ToLower(strings.TrimSpace(query))
 
 	execDir := filepath.Dir(os.Args[0])
@@ -1498,6 +1598,11 @@ func smartSearch(query string, limit int) ([]SmartSearchResult, error) {
 		return nil
 	})
 
+	snippetCandidates, err := loadSnippetCandidates()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	tokens := strings.Fields(queryLower)
 	var scored []smartCandidate
 	for _, c := range candidates {
@@ -1507,19 +1612,219 @@ func smartSearch(query string, limit int) ([]SmartSearchResult, error) {
 		}
 	}
 
+	var snippetScored []smartCandidate
+	for _, c := range snippetCandidates {
+		c.Score = scoreSnippetCandidate(queryLower, tokens, c.combinedLower, strings.ToLower(c.Symbol))
+		if c.Score > 0 {
+			snippetScored = append(snippetScored, c)
+		}
+	}
+
 	sort.Slice(scored, func(i, j int) bool {
 		return scored[i].Score > scored[j].Score
+	})
+	sort.Slice(snippetScored, func(i, j int) bool {
+		return snippetScored[i].Score > snippetScored[j].Score
 	})
 
 	if len(scored) > limit {
 		scored = scored[:limit]
 	}
 
+	snippetLimit := min(5, max(1, limit/3))
+	if len(snippetScored) > snippetLimit {
+		snippetScored = snippetScored[:snippetLimit]
+	}
+
 	out := make([]SmartSearchResult, len(scored))
 	for i, c := range scored {
 		out[i] = c.SmartSearchResult
 	}
-	return out, nil
+
+	snippetOut := make([]SmartSearchResult, len(snippetScored))
+	for i, c := range snippetScored {
+		snippetOut[i] = c.SmartSearchResult
+	}
+
+	return out, snippetOut, nil
+}
+
+func loadSnippetCandidates() ([]smartCandidate, error) {
+	paths := resolveSnippetSearchFiles()
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]bool)
+	results := make([]smartCandidate, 0)
+	for _, path := range paths {
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		results = append(results, parseSnippetEntries(string(content))...)
+	}
+
+	return results, nil
+}
+
+func resolveSnippetSearchFiles() []string {
+	roots := searchRoots()
+	paths := make([]string, 0)
+	seen := make(map[string]bool)
+	patterns := []string{
+		filepath.Join("snippets", "*.code-snippets"),
+		filepath.Join("vscode-extension", "snippets", "*.code-snippets"),
+	}
+
+	for _, root := range roots {
+		for _, pattern := range patterns {
+			matches, err := filepath.Glob(filepath.Join(root, pattern))
+			if err != nil {
+				continue
+			}
+			for _, match := range matches {
+				if !seen[match] {
+					seen[match] = true
+					paths = append(paths, match)
+				}
+			}
+		}
+	}
+
+	return paths
+}
+
+func parseSnippetEntries(content string) []smartCandidate {
+	cleaned := stripJSONComments(content)
+	entries := make(map[string]snippetFileEntry)
+	if err := json.Unmarshal([]byte(cleaned), &entries); err != nil {
+		return nil
+	}
+
+	results := make([]smartCandidate, 0, len(entries))
+	for title, entry := range entries {
+		prefixes := toStringSlice(entry.Prefix)
+		bodyLines := toStringSlice(entry.Body)
+
+		prefix := title
+		if len(prefixes) > 0 && strings.TrimSpace(prefixes[0]) != "" {
+			prefix = strings.TrimSpace(prefixes[0])
+		}
+
+		description := strings.TrimSpace(entry.Description)
+		if description == "" {
+			description = title
+		}
+
+		signature := ""
+		if len(bodyLines) > 0 {
+			signature = strings.TrimSpace(bodyLines[0])
+		}
+
+		combinedParts := []string{title, strings.Join(prefixes, " "), description, strings.Join(bodyLines, " ")}
+		combined := strings.ToLower(strings.Join(combinedParts, " "))
+
+		results = append(results, smartCandidate{
+			SmartSearchResult: SmartSearchResult{
+				Symbol:      prefix,
+				Kind:        "snippet",
+				Section:     "snippet",
+				Description: fmt.Sprintf("%s (%s)", description, title),
+				Signature:   signature,
+			},
+			combinedLower: combined,
+		})
+	}
+
+	return results
+}
+
+func stripJSONComments(content string) string {
+	var sb strings.Builder
+	inString := false
+	escaped := false
+	inLineComment := false
+	inBlockComment := false
+
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+		next := byte(0)
+		if i+1 < len(content) {
+			next = content[i+1]
+		}
+
+		if inLineComment {
+			if ch == '\n' {
+				inLineComment = false
+				sb.WriteByte(ch)
+			}
+			continue
+		}
+		if inBlockComment {
+			if ch == '*' && next == '/' {
+				inBlockComment = false
+				i++
+			}
+			continue
+		}
+
+		if inString {
+			sb.WriteByte(ch)
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		if ch == '/' && next == '/' {
+			inLineComment = true
+			i++
+			continue
+		}
+		if ch == '/' && next == '*' {
+			inBlockComment = true
+			i++
+			continue
+		}
+		if ch == '"' {
+			inString = true
+		}
+
+		sb.WriteByte(ch)
+	}
+
+	return sb.String()
+}
+
+func toStringSlice(raw interface{}) []string {
+	switch typed := raw.(type) {
+	case string:
+		return []string{typed}
+	case []interface{}:
+		out := make([]string, 0, len(typed))
+		for _, value := range typed {
+			if str, ok := value.(string); ok {
+				out = append(out, str)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func parseDLuaEntries(filePath, content string) []smartCandidate {
@@ -1648,6 +1953,15 @@ func scoreSmartCandidate(queryLower string, tokens []string, combinedLower, symb
 	}
 
 	return score
+}
+
+func scoreSnippetCandidate(queryLower string, tokens []string, combinedLower, symbolLower string) float64 {
+	base := scoreSmartCandidate(queryLower, tokens, combinedLower, symbolLower)
+	if base <= 0 {
+		return 0
+	}
+
+	return base * 0.55
 }
 
 // ── end smart_search ─────────────────────────────────────────────────────────

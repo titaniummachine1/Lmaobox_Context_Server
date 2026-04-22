@@ -16,3 +16,14 @@ end)
 
 - Message fields depend on game; often requires protobuf/bit reading
 - Use selectively; can be frequent
+
+### Matching Snippet
+
+- Prefix: `lm.dispatchUserMessage`
+
+```lua
+callbacks.Unregister("DispatchUserMessage", "unique_id")
+callbacks.Register("DispatchUserMessage", "unique_id", function(message)
+    -- inspect message here
+end)
+```

@@ -1,0 +1,112 @@
+{
+  "Lmaobox CreateMove Callback": {
+    "prefix": "lm.createMove",
+    "body": [
+      "callbacks.Unregister(\"CreateMove\", \"${1:unique_id}\")",
+      "callbacks.Register(\"CreateMove\", \"${1:unique_id}\", function(${2:cmd})",
+      "    ${0}",
+      "end)"
+    ],
+    "description": "Register a CreateMove callback with a unique id."
+  },
+  "Lmaobox Draw Callback": {
+    "prefix": "lm.draw",
+    "body": [
+      "callbacks.Unregister(\"Draw\", \"${1:unique_id}\")",
+      "callbacks.Register(\"Draw\", \"${1:unique_id}\", function()",
+      "    ${0}",
+      "end)"
+    ],
+    "description": "Register a Draw callback with a unique id."
+  },
+  "Lmaobox FireGameEvent Callback": {
+    "prefix": "lm.fireGameEvent",
+    "body": [
+      "callbacks.Unregister(\"FireGameEvent\", \"${1:unique_id}\")",
+      "callbacks.Register(\"FireGameEvent\", \"${1:unique_id}\", function(${2:event})",
+      "    ${0}",
+      "end)"
+    ],
+    "description": "Register a FireGameEvent callback with a unique id."
+  },
+  "Lmaobox DispatchUserMessage Callback": {
+    "prefix": "lm.dispatchUserMessage",
+    "body": [
+      "callbacks.Unregister(\"DispatchUserMessage\", \"${1:unique_id}\")",
+      "callbacks.Register(\"DispatchUserMessage\", \"${1:unique_id}\", function(${2:message})",
+      "    ${0}",
+      "end)"
+    ],
+    "description": "Register a DispatchUserMessage callback with a unique id."
+  },
+  "Lmaobox Unregister Callback": {
+    "prefix": "lm.unregister",
+    "body": [
+      "callbacks.Unregister(\"${1:CreateMove}\", \"${2:unique_id}\")"
+    ],
+    "description": "Unregister a callback by event name and unique id."
+  },
+  "Lmaobox Local Player": {
+    "prefix": "lm.localPlayer",
+    "body": [
+      "local ${1:localPlayer} = entities.GetLocalPlayer()",
+      "if ${1:localPlayer} == nil then",
+      "    return",
+      "end",
+      "${0}"
+    ],
+    "description": "Get the local player and early-return if unavailable."
+  },
+  "Lmaobox Alive Local Player": {
+    "prefix": "lm.aliveLocalPlayer",
+    "body": [
+      "local ${1:localPlayer} = entities.GetLocalPlayer()",
+      "if ${1:localPlayer} == nil or not ${1:localPlayer}:IsAlive() then",
+      "    return",
+      "end",
+      "${0}"
+    ],
+    "description": "Get the local player and early-return unless alive."
+  },
+  "Lmaobox ChatPrintf": {
+    "prefix": "lm.chatPrintf",
+    "body": [
+      "client.ChatPrintf(\"${1:text}\")"
+    ],
+    "description": "Print a message to in-game chat."
+  },
+  "Lmaobox Command": {
+    "prefix": "lm.command",
+    "body": [
+      "client.Command(\"${1:command}\", ${2:true})"
+    ],
+    "description": "Run a client command."
+  },
+  "Lmaobox World To Screen": {
+    "prefix": "lm.worldToScreen",
+    "body": [
+      "local ${1:screenX}, ${2:screenY} = client.WorldToScreen(${3:position})",
+      "if ${1:screenX} == nil or ${2:screenY} == nil then",
+      "    return",
+      "end",
+      "${0}"
+    ],
+    "description": "Convert a world position to screen coordinates with a visibility guard."
+  },
+  "Lmaobox Trace Line": {
+    "prefix": "lm.traceLine",
+    "body": [
+      "local ${1:fraction}, ${2:entity} = engine.TraceLine(${3:startPos}, ${4:endPos}, ${5:mask})",
+      "${0}"
+    ],
+    "description": "Trace a line and capture hit fraction and entity."
+  },
+  "Lmaobox Draw Text": {
+    "prefix": "lm.drawText",
+    "body": [
+      "draw.Color(${1:255}, ${2:255}, ${3:255}, ${4:255})",
+      "draw.Text(${5:x}, ${6:y}, \"${7:text}\")"
+    ],
+    "description": "Draw colored text on screen."
+  }
+}

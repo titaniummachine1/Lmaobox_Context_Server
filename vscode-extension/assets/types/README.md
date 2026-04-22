@@ -2,6 +2,13 @@
 
 This folder contains comprehensive type definitions for the Lmaobox Lua API to enable proper linting, autocompletion, and type checking in VS Code.
 
+These type definitions are complemented by the VS Code extension's Lua snippets
+and `data/smart_context` markdown. In practice:
+
+- `types/` improves hover, diagnostics, and completion shape
+- `data/smart_context/` adds curated usage notes for MCP lookups
+- extension snippets accelerate common callback and API patterns
+
 ## Auto-Update
 
 The Lua runtime version is set to **Lua 5.4** in `.luarc.json`, which will automatically use the latest 5.4.x version as the language server updates.

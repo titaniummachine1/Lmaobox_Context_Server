@@ -2,14 +2,15 @@
   "name": "lmaobox-context",
   "displayName": "Lmaobox Context",
   "description": "Automatically installs and configures the Lmaobox MCP server runtime for VS Code.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "titaniummachine1",
   "license": "MIT",
   "engines": {
     "vscode": "^1.95.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Snippets"
   ],
   "keywords": [
     "mcp",
@@ -22,6 +23,12 @@
   ],
   "main": "./extension.js",
   "contributes": {
+    "snippets": [
+      {
+        "language": "lua",
+        "path": "./snippets/lmaobox.code-snippets"
+      }
+    ],
     "commands": [
       {
         "command": "lmaoboxContext.installOrUpdateRuntime",

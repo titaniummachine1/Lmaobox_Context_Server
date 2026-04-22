@@ -19,6 +19,16 @@ If you want to force a reinstall or update, run `Lmaobox Context: Install Or Upd
 
 The goal is "install extension and it just works": runtime download, MCP registration, and docs/types availability are handled by the extension.
 
+## Included Lua Snippets
+
+The extension also ships first-party Lua snippets for common Lmaobox scripting patterns, including:
+
+- callback registration templates
+- local player guards
+- common client, draw, and trace helpers
+
+Start typing prefixes such as `lm.createMove`, `lm.draw`, `lm.localPlayer`, or `lm.traceLine` in a Lua file.
+
 ## Expected release assets
 
 The extension expects these files on the GitHub release matching the extension version tag:
@@ -63,3 +73,7 @@ If MCP does not start or tools are missing:
 4. Restart VS Code after reinstall.
 
 If GitHub release assets are unavailable for your version, set `lmaoboxContext.releaseTag` temporarily to a valid tag.
+
+## Notes On Snippets
+
+This extension includes first-party snippets maintained with the MCP/runtime integration. It does not bundle third-party snippet packs.

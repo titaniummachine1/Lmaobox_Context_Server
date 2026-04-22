@@ -14,6 +14,11 @@
 Smart context files should contain only extra guidance and curated usage notes.
 Do not duplicate full type signatures from `types/` unless you are intentionally overriding wording.
 
+Snippet guidance is allowed when it adds practical usage help. Prefer attaching
+snippet notes to the matching symbol page and keeping broader snippet catalogs in
+`custom.*.md` files so MCP search can find both symbol docs and reusable
+templates.
+
 The server automatically composes:
 
 1. Base type context from `get_types(symbol)`.

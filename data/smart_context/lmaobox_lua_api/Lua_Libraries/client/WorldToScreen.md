@@ -64,3 +64,14 @@ end
 - Always nil-check result before using
 - Use for ESP, labels, snaplines
 
+### Matching Snippet
+
+- Prefix: `lm.worldToScreen`
+
+```lua
+local screenX, screenY = client.WorldToScreen(position)
+if screenX == nil or screenY == nil then
+    return
+end
+```
+

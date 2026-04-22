@@ -23,3 +23,14 @@ end)
 
 - Use IN\_\* constants for buttons
 - Combine with helpers: GetEyePos, AngleToPosition, IsVisible
+
+### Matching Snippet
+
+- Prefix: `lm.createMove`
+
+```lua
+callbacks.Unregister("CreateMove", "unique_id")
+callbacks.Register("CreateMove", "unique_id", function(cmd)
+    -- body
+end)
+```

@@ -147,6 +147,12 @@ async function ensureBundledAssets(runtimeDir, context) {
         // copy bundled asset into runtime dir
         await fs.cp(src, a.dest, { recursive: true });
     }
+
+    const bundledSnippets = path.join(context.extensionPath, 'snippets');
+    const runtimeSnippets = path.join(runtimeDir, 'snippets');
+    if (!(await pathExists(runtimeSnippets)) && (await pathExists(bundledSnippets))) {
+        await fs.cp(bundledSnippets, runtimeSnippets, { recursive: true });
+    }
 }
 
 async function configureMcp(serverPath, runtimeDir) {
