@@ -273,3 +273,128 @@ end)
 		t.Fatalf("expected ID-less unregister to satisfy kill-switch, got violations: %v", violations)
 	}
 }
+
+// TestForbidCollectGarbage verifies collectgarbage() is flagged
+func TestForbidCollectGarbage(t *testing.T) {
+	src := `
+local function cleanup()
+    collectgarbage("collect")
+end
+`
+	path := createTempLuaFile(t, "collectgarbage", src)
+
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+
+	if len(violations) == 0 {
+		t.Fatalf("expected collectgarbage violation")
+	}
+
+	if !strings.Contains(violations[0].Message, "collectgarbage") {
+		t.Fatalf("expected collectgarbage message, got: %s", violations[0].Message)
+	}
+}
+
+// TestCollectGarbageAllowed verifies collectgarbage as a variable name is not flagged
+func TestCollectGarbageNotACall(t *testing.T) {
+	src := `
+local collectgarbage = nil
+print(collectgarbage)
+`
+	path := createTempLuaFile(t, "collectgarbage_var", src)
+
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+
+	for _, v := range violations {
+		if strings.Contains(v.Message, "collectgarbage") {
+			t.Fatalf("should not flag collectgarbage variable, got: %s", v.Message)
+		}
+	}
+}
+
+// TestForbidRequireInFunction verifies require() inside a function is flagged
+func TestForbidRequireInFunction(t *testing.T) {
+	src := `
+local function setup()
+    local lib = require("SomeLib")
+    lib.init()
+end
+`
+	path := createTempLuaFile(t, "require_in_func", src)
+
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+
+	if len(violations) == 0 {
+		t.Fatalf("expected require-in-function violation")
+	}
+
+	if !strings.Contains(violations[0].Message, "require()") {
+		t.Fatalf("expected require() message, got: %s", violations[0].Message)
+	}
+}
+
+// TestRequireAtTopLevelAllowed verifies top-level require() is fine
+func TestRequireAtTopLevelAllowed(t *testing.T) {
+	src := `
+local lnxLib = require("lnxLib")
+local TimMenu = require("TimMenu")
+`
+	path := createTempLuaFile(t, "require_top", src)
+
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+
+	for _, v := range violations {
+		if strings.Contains(v.Message, "require()") {
+			t.Fatalf("top-level require should be allowed, got: %s", v.Message)
+		}
+	}
+}
+
+// TestForbidGlobalTable verifies _G access is flagged
+func TestForbidGlobalTable(t *testing.T) {
+	src := `
+_G["myVar"] = 42
+`
+	path := createTempLuaFile(t, "global_table", src)
+
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+
+	if len(violations) == 0 {
+		t.Fatalf("expected _G violation")
+	}
+
+	if !strings.Contains(violations[0].Message, "_G") {
+		t.Fatalf("expected _G message, got: %s", violations[0].Message)
+	}
+}
+
+// TestForbidGlobalTableDotAccess verifies _G.foo access is flagged
+func TestForbidGlobalTableDotAccess(t *testing.T) {
+	src := `
+local x = _G.someGlobal
+`
+	path := createTempLuaFile(t, "global_table_dot", src)
+
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+
+	if len(violations) == 0 {
+		t.Fatalf("expected _G dot-access violation")
+	}
+}

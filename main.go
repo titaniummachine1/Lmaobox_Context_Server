@@ -49,6 +49,9 @@ type LboxMutationPolicy struct {
 	RequireDepthZeroUnregister bool
 	RequireKillSwitchOrder     bool
 	ForbidRuntimeUnregister    bool
+	ForbidCollectGarbage       bool // collectgarbage() masks leaks, never allowed
+	ForbidRequireInFunction    bool // require() inside a function causes memory leaks
+	ForbidGlobalTable          bool // _G usage forbidden; use G module instead
 }
 
 type luaPolicyViolation struct {
@@ -75,6 +78,9 @@ var defaultLboxMutationPolicy = LboxMutationPolicy{
 	RequireDepthZeroUnregister: true,
 	RequireKillSwitchOrder:     true,
 	ForbidRuntimeUnregister:    true,
+	ForbidCollectGarbage:       true,
+	ForbidRequireInFunction:    true,
+	ForbidGlobalTable:          true,
 }
 
 func main() {
@@ -932,6 +938,82 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 					}
 				}
 			}
+		}
+	}
+
+	// Second pass: token-level rules (collectgarbage, require-in-function, _G)
+	functionDepth2 := 0
+	blockStack2 := make([]luaPolicyBlockKind, 0)
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+
+		if tok.Kind == "keyword" {
+			switch tok.Text {
+			case "function":
+				blockStack2 = append(blockStack2, luaBlockFunction)
+				functionDepth2++
+			case "if", "for", "while", "do":
+				blockStack2 = append(blockStack2, luaBlockGeneric)
+			case "repeat":
+				blockStack2 = append(blockStack2, luaBlockRepeat)
+			case "end":
+				if len(blockStack2) > 0 {
+					for j := len(blockStack2) - 1; j >= 0; j-- {
+						if blockStack2[j] == luaBlockRepeat {
+							continue
+						}
+						if blockStack2[j] == luaBlockFunction && functionDepth2 > 0 {
+							functionDepth2--
+						}
+						blockStack2 = append(blockStack2[:j], blockStack2[j+1:]...)
+						break
+					}
+				}
+			case "until":
+				if len(blockStack2) > 0 {
+					for j := len(blockStack2) - 1; j >= 0; j-- {
+						if blockStack2[j] == luaBlockRepeat {
+							blockStack2 = append(blockStack2[:j], blockStack2[j+1:]...)
+							break
+						}
+					}
+				}
+			}
+			continue
+		}
+
+		if tok.Kind != "ident" {
+			continue
+		}
+
+		// collectgarbage() — forbidden entirely
+		if policy.ForbidCollectGarbage && tok.Text == "collectgarbage" {
+			// Must be followed by ( to be a call
+			if i+1 < len(tokens) && tokens[i+1].Kind == "symbol" && tokens[i+1].Text == "(" {
+				violations = append(violations, luaPolicyViolation{
+					Line:    tok.Line,
+					Message: "CRITICAL: collectgarbage() is forbidden — it masks memory leaks instead of fixing them",
+				})
+			}
+		}
+
+		// require() inside a function — causes memory leaks
+		if policy.ForbidRequireInFunction && tok.Text == "require" && functionDepth2 > 0 {
+			if i+1 < len(tokens) && tokens[i+1].Kind == "symbol" && tokens[i+1].Text == "(" {
+				violations = append(violations, luaPolicyViolation{
+					Line:    tok.Line,
+					Message: "CRITICAL: require() inside a function causes memory leaks — move all require() calls to the top of the file",
+				})
+			}
+		}
+
+		// _G usage — forbidden, use G module instead
+		// Fire on any _G token — any access or assignment is forbidden
+		if policy.ForbidGlobalTable && tok.Text == "_G" {
+			violations = append(violations, luaPolicyViolation{
+				Line:    tok.Line,
+				Message: "CRITICAL: _G usage is forbidden — use the G module for shared state instead",
+			})
 		}
 	}
 
@@ -2166,12 +2248,9 @@ func ensureDependencies() error {
 		return nil
 	}
 
-	// Need to auto-install. Try running setup scripts.
-	scriptDir := filepath.Join(filepath.Dir(os.Args[0]), "automations")
-
 	if luacPath == "" {
-		log.Printf("Lua compiler not found, attempting auto-install...")
-		if err := runSetupScript(scriptDir, "install_lua.py"); err != nil {
+		log.Printf("Lua compiler not found, attempting auto-install via choco...")
+		if err := installLuac(); err != nil {
 			return fmt.Errorf("Lua 5.4+ installation failed: %w\n"+
 				"Please install manually from: https://luabinaries.sourceforge.net/\n"+
 				"Or use: choco install lua (if you have Chocolatey)", err)
@@ -2181,7 +2260,7 @@ func ensureDependencies() error {
 
 	if luacheckPath == "" {
 		log.Printf("luacheck not found, attempting auto-install...")
-		if err := installLuacheck(scriptDir); err != nil {
+		if err := installLuacheck(""); err != nil {
 			log.Printf("⚠ luacheck auto-install failed (non-critical): %v", err)
 			// Don't fail here - luacheck is optional for MCP functionality
 		} else {
@@ -2192,22 +2271,23 @@ func ensureDependencies() error {
 	return nil
 }
 
-func installLuacheck(scriptDir string) error {
-	// Strategy 1: Python setup script
-	pythonBin := findPython()
-	if _, err := exec.LookPath(pythonBin); err == nil {
-		scriptPath := filepath.Join(scriptDir, "install_luacheck.py")
-		if _, serr := os.Stat(scriptPath); serr == nil {
-			cmd := exec.Command(pythonBin, scriptPath)
-			if out, err := cmd.CombinedOutput(); err == nil {
-				log.Printf("luacheck install (python script) output:\n%s", string(out))
+func installLuac() error {
+	for _, choco := range []string{"choco", "choco.exe"} {
+		if _, err := exec.LookPath(choco); err == nil {
+			log.Printf("Trying: %s install lua", choco)
+			cmd := exec.Command(choco, "install", "lua", "-y")
+			out, err := cmd.CombinedOutput()
+			log.Printf("choco output:\n%s", string(out))
+			if err == nil {
 				return nil
 			}
-			log.Printf("Python install script failed, trying next method...")
 		}
 	}
+	return fmt.Errorf("choco not available. Install Lua 5.4+ manually from: https://luabinaries.sourceforge.net/")
+}
 
-	// Strategy 2: npm install -g luacheck
+func installLuacheck(_ string) error {
+	// Strategy 1: npm install -g luacheck
 	if _, err := exec.LookPath("npm"); err == nil {
 		log.Printf("Trying: npm install -g luacheck")
 		cmd := exec.Command("npm", "install", "-g", "luacheck")
@@ -2234,36 +2314,6 @@ func installLuacheck(scriptDir string) error {
 	}
 
 	return fmt.Errorf("all install methods failed. Install manually: npm install -g luacheck  OR  pip install luacheck")
-}
-
-func runSetupScript(scriptDir, scriptName string) error {
-	scriptPath := filepath.Join(scriptDir, scriptName)
-
-	// Check if script exists
-	if _, err := os.Stat(scriptPath); err != nil {
-		return fmt.Errorf("setup script not found at %s", scriptPath)
-	}
-
-	// Run the Python script
-	cmd := exec.Command(findPython(), scriptPath)
-	output, err := cmd.CombinedOutput()
-
-	if err != nil {
-		return fmt.Errorf("setup script %s failed: %s\n%s", scriptName, err, string(output))
-	}
-
-	log.Printf("Setup script output:\n%s", string(output))
-	return nil
-}
-
-func findPython() string {
-	candidates := []string{"python3", "python", "python.exe"}
-	for _, cmd := range candidates {
-		if _, err := exec.LookPath(cmd); err == nil {
-			return cmd
-		}
-	}
-	return "python"
 }
 
 func findLuac() string {

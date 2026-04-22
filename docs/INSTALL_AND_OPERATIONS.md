@@ -34,9 +34,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -RunWebRefresh
   "servers": {
     "lmaobox-context": {
       "type": "stdio",
-      "command": "python",
-      "args": ["C:/path/to/Lmaobox_Context_Server/launch_mcp.py"],
-      "cwd": "C:/path/to/Lmaobox_Context_Server",
+      "command": "C:/path/to/lmaobox-context-protocol/lmaobox-mcp.exe",
+      "args": [],
       "disabled": false
     }
   }
@@ -45,16 +44,11 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -RunWebRefresh
 
 ## Run Modes
 
-Stdio mode (for MCP client):
+Build binary:
 
 ```powershell
-python launch_mcp.py
-```
-
-HTTP mode (debug/testing):
-
-```powershell
-python -m src.mcp_server.server
+cd c:\gitProjects\lmaobox-context-protocol
+go build -o lmaobox-mcp.exe .
 ```
 
 ## Operational Commands
