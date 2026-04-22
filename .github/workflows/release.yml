@@ -60,7 +60,11 @@ jobs:
 
           go build -trimpath -o "runtime-stage/${BINARY_NAME}" .
 
-          cp -R smart_context runtime-stage/smart_context
+          if [ -d data/smart_context ]; then
+            cp -R data/smart_context runtime-stage/smart_context
+          else
+            cp -R smart_context runtime-stage/smart_context
+          fi
           cp -R types runtime-stage/types
 
           if [ -d automations/bin ]; then

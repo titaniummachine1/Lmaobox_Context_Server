@@ -31,6 +31,19 @@ jobs:
         working-directory: vscode-extension
         run: npm install
 
+      - name: Sync bundled assets into extension package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf vscode-extension/assets/types vscode-extension/assets/smart_context
+          mkdir -p vscode-extension/assets
+          cp -R types vscode-extension/assets/types
+          if [ -d data/smart_context ]; then
+            cp -R data/smart_context vscode-extension/assets/smart_context
+          else
+            cp -R smart_context vscode-extension/assets/smart_context
+          fi
+
       - name: Verify extension version matches release tag
         shell: bash
         env:
