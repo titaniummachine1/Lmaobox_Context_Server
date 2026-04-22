@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -41,6 +42,39 @@ type BundleContext struct {
 	Modules     map[string]*LuaModule
 	Visited     map[string]bool
 	Stack       map[string]bool
+}
+
+type LboxMutationPolicy struct {
+	RequireDepthZeroRegister   bool
+	RequireDepthZeroUnregister bool
+	RequireKillSwitchOrder     bool
+	ForbidRuntimeUnregister    bool
+}
+
+type luaPolicyViolation struct {
+	Line    int
+	Message string
+}
+
+type luaToken struct {
+	Kind string
+	Text string
+	Line int
+}
+
+type luaPolicyBlockKind int
+
+const (
+	luaBlockGeneric luaPolicyBlockKind = iota
+	luaBlockFunction
+	luaBlockRepeat
+)
+
+var defaultLboxMutationPolicy = LboxMutationPolicy{
+	RequireDepthZeroRegister:   true,
+	RequireDepthZeroUnregister: true,
+	RequireKillSwitchOrder:     true,
+	ForbidRuntimeUnregister:    true,
 }
 
 func main() {
@@ -201,24 +235,14 @@ func handleLuacheck(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 
 		return mcp.NewToolResultText("✓ Bundle structure is valid and can be bundled successfully"), nil
 	} else {
-		// Syntax check with luac
-		luacPath := findLuac()
-		if luacPath == "" {
-			return mcp.NewToolResultError("Lua compiler not found. Install Lua 5.4+ from https://luabinaries.sourceforge.net/"), nil
+		if err := validateLuaSyntax(checkCtx, filePath); err != nil {
+			if checkCtx.Err() == context.DeadlineExceeded {
+				return mcp.NewToolResultError("Syntax check timed out after 10 seconds"), nil
+			}
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		cmd := exec.CommandContext(checkCtx, luacPath, "-p", filePath)
-		output, err := cmd.CombinedOutput()
-
-		if checkCtx.Err() == context.DeadlineExceeded {
-			return mcp.NewToolResultError("Syntax check timed out after 10 seconds"), nil
-		}
-
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Lua syntax error:\n%s", string(output))), nil
-		}
-
-		return mcp.NewToolResultText("✓ Lua syntax is valid"), nil
+		return mcp.NewToolResultText("✓ Lua syntax is valid and passed Zero-Mutation callback policy"), nil
 	}
 }
 
@@ -710,7 +734,570 @@ func validateLuaSyntax(ctx context.Context, filePath string) error {
 		return fmt.Errorf("syntax error: %s", string(output))
 	}
 
+	violations, err := checkLuaCallbackMutationPolicy(filePath, defaultLboxMutationPolicy)
+	if err != nil {
+		return fmt.Errorf("policy check failed: %v", err)
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf(formatLuaPolicyViolations(filePath, violations))
+	}
+
+	// Additional lint pass: run luacheck if available. Luacheck is optional; if not
+	// installed we'll silently skip this pass. If luacheck runs and reports issues,
+	// surface them as a failure so callers (and the MCP tool) reject the file.
+	luacheckIssues, lerr := runLuacheck(ctx, filePath)
+	if lerr != nil {
+		if !errors.Is(lerr, errLuacheckNotFound) {
+			return fmt.Errorf("luacheck failed: %v", lerr)
+		}
+		// luacheck not installed: skip
+		return nil
+	}
+	if len(luacheckIssues) > 0 {
+		return fmt.Errorf(formatLuacheckIssues(filePath, luacheckIssues))
+	}
+
 	return nil
+}
+
+func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) ([]luaPolicyViolation, error) {
+	contentBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file for policy scan: %v", err)
+	}
+
+	tokens, err := tokenizeLua(string(contentBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	violations := make([]luaPolicyViolation, 0)
+	blockStack := make([]luaPolicyBlockKind, 0)
+	functionDepth := 0
+	unregisteredAtDepthZero := make(map[string]bool)
+
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+
+		if method, args, endIndex, ok := extractCallbacksCall(tokens, i); ok {
+			line := tok.Line
+			eventName := stringArgValue(args, 0)
+			uniqueID := stringArgValue(args, 1)
+
+			if strings.EqualFold(method, "register") {
+				if policy.RequireDepthZeroRegister && functionDepth > 0 {
+					violations = append(violations, luaPolicyViolation{
+						Line:    line,
+						Message: "CRITICAL: callbacks.Register must be declared at depth 0 (global scope only)",
+					})
+				}
+
+				if policy.RequireKillSwitchOrder && functionDepth == 0 && eventName != "" {
+					// Check kill-switch: either exact ID match or event-only unregister
+					killSwitchKeyExact := strings.ToLower(eventName + "|" + uniqueID)
+					killSwitchKeyEvent := strings.ToLower(eventName + "|")
+					hasExactMatch := unregisteredAtDepthZero[killSwitchKeyExact]
+					hasEventMatch := unregisteredAtDepthZero[killSwitchKeyEvent]
+
+					if uniqueID != "" && !hasExactMatch && !hasEventMatch {
+						violations = append(violations, luaPolicyViolation{
+							Line:    line,
+							Message: fmt.Sprintf("CRITICAL: Kill-Switch violation for id '%s' on event '%s': callbacks.Unregister must appear before callbacks.Register at depth 0", uniqueID, eventName),
+						})
+					}
+				}
+			}
+
+			if strings.EqualFold(method, "unregister") {
+				reportedRuntimeUnregister := false
+				if policy.ForbidRuntimeUnregister && functionDepth > 0 {
+					violations = append(violations, luaPolicyViolation{
+						Line:    line,
+						Message: "CRITICAL: Illegal Unregister inside function scope (including Unload). Runtime callback table mutation is forbidden",
+					})
+					reportedRuntimeUnregister = true
+				}
+
+				if policy.RequireDepthZeroUnregister && functionDepth > 0 && !reportedRuntimeUnregister {
+					violations = append(violations, luaPolicyViolation{
+						Line:    line,
+						Message: "CRITICAL: callbacks.Unregister must be declared at depth 0 (global scope only)",
+					})
+				}
+
+				if functionDepth == 0 && eventName != "" {
+					// Track unregister at depth 0. If no ID, mark as event-only unregister
+					if uniqueID != "" {
+						killSwitchKey := strings.ToLower(eventName + "|" + uniqueID)
+						unregisteredAtDepthZero[killSwitchKey] = true
+					} else {
+						// Unregister without ID satisfies kill-switch for this event
+						killSwitchKey := strings.ToLower(eventName + "|")
+						unregisteredAtDepthZero[killSwitchKey] = true
+					}
+				}
+			}
+
+			// Process the tokens between i and endIndex to track function depth changes
+			// AND check for nested callbacks calls inside function arguments.
+			for j := i; j < endIndex; j++ {
+				t := tokens[j]
+
+				// Update depth BEFORE checking for nested callbacks calls
+				if t.Kind == "keyword" {
+					switch t.Text {
+					case "function":
+						blockStack = append(blockStack, luaBlockFunction)
+						functionDepth++
+					case "end":
+						if len(blockStack) > 0 {
+							for k := len(blockStack) - 1; k >= 0; k-- {
+								if blockStack[k] == luaBlockRepeat {
+									continue
+								}
+								if blockStack[k] == luaBlockFunction && functionDepth > 0 {
+									functionDepth--
+								}
+								blockStack = append(blockStack[:k], blockStack[k+1:]...)
+								break
+							}
+						}
+					}
+				}
+
+				// Check for nested callbacks calls inside this range using CURRENT depth
+				if t.Kind == "ident" && strings.EqualFold(t.Text, "callbacks") {
+					if nestedMethod, nestedArgs, _, nestedOk := extractCallbacksCall(tokens, j); nestedOk {
+						nestedEventName := stringArgValue(nestedArgs, 0)
+						nestedID := stringArgValue(nestedArgs, 1)
+						nestedLine := t.Line
+
+						// Check nested call violations at CURRENT functionDepth
+						if strings.EqualFold(nestedMethod, "unregister") {
+							if policy.ForbidRuntimeUnregister && functionDepth > 0 {
+								violations = append(violations, luaPolicyViolation{
+									Line:    nestedLine,
+									Message: "CRITICAL: Illegal Unregister inside function scope (including Unload). Runtime callback table mutation is forbidden",
+								})
+							}
+						}
+						if strings.EqualFold(nestedMethod, "register") {
+							if policy.RequireDepthZeroRegister && functionDepth > 0 {
+								violations = append(violations, luaPolicyViolation{
+									Line:    nestedLine,
+									Message: "CRITICAL: callbacks.Register must be declared at depth 0 (global scope only)",
+								})
+							}
+						}
+					}
+				}
+			}
+
+			i = endIndex
+			continue
+		}
+
+		if tok.Kind == "keyword" {
+			switch tok.Text {
+			case "function":
+				blockStack = append(blockStack, luaBlockFunction)
+				functionDepth++
+			case "if", "for", "while", "do":
+				blockStack = append(blockStack, luaBlockGeneric)
+			case "repeat":
+				blockStack = append(blockStack, luaBlockRepeat)
+			case "end":
+				if len(blockStack) > 0 {
+					for j := len(blockStack) - 1; j >= 0; j-- {
+						if blockStack[j] == luaBlockRepeat {
+							continue
+						}
+						if blockStack[j] == luaBlockFunction && functionDepth > 0 {
+							functionDepth--
+						}
+						blockStack = append(blockStack[:j], blockStack[j+1:]...)
+						break
+					}
+				}
+			case "until":
+				if len(blockStack) > 0 {
+					for j := len(blockStack) - 1; j >= 0; j-- {
+						if blockStack[j] == luaBlockRepeat {
+							blockStack = append(blockStack[:j], blockStack[j+1:]...)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return violations, nil
+}
+
+func formatLuaPolicyViolations(filePath string, violations []luaPolicyViolation) string {
+	var builder strings.Builder
+	builder.WriteString("Zero-Mutation Lbox policy violation(s) detected:\n")
+	builder.WriteString(fmt.Sprintf("file: %s\n", filePath))
+
+	for _, violation := range violations {
+		builder.WriteString(fmt.Sprintf("- line %d: %s\n", violation.Line, violation.Message))
+	}
+
+	return builder.String()
+}
+
+func formatLuacheckIssues(filePath string, issues []string) string {
+	var builder strings.Builder
+	builder.WriteString("Luacheck reported issue(s):\n")
+	builder.WriteString(fmt.Sprintf("file: %s\n", filePath))
+
+	for _, issue := range issues {
+		builder.WriteString(fmt.Sprintf("- %s\n", issue))
+	}
+
+	return builder.String()
+}
+
+var errLuacheckNotFound = errors.New("luacheck not found")
+
+// runLuacheck executes luacheck on a single file and returns any reported lines
+// as a slice of strings. If luacheck is not installed this returns
+// errLuacheckNotFound.
+func runLuacheck(ctx context.Context, filePath string) ([]string, error) {
+	luacheckPath := findLuacheck()
+	if luacheckPath == "" {
+		return nil, errLuacheckNotFound
+	}
+
+	// Use --no-color to keep output parseable. Luacheck exits non-zero when
+	// issues are present; still capture stdout/stderr and parse any output.
+	cmd := exec.CommandContext(ctx, luacheckPath, "--no-color", "--codes", filePath)
+	output, err := cmd.CombinedOutput()
+	if len(output) == 0 && err != nil {
+		return nil, fmt.Errorf("luacheck execution failed: %v", err)
+	}
+
+	raw := strings.TrimSpace(string(output))
+	if raw == "" {
+		return nil, nil
+	}
+
+	lines := strings.Split(raw, "\n")
+	issues := make([]string, 0, len(lines))
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		issues = append(issues, l)
+	}
+
+	return issues, nil
+}
+
+func extractCallbacksCall(tokens []luaToken, start int) (string, [][]luaToken, int, bool) {
+	if start+3 >= len(tokens) {
+		return "", nil, start, false
+	}
+
+	if !(tokens[start].Kind == "ident" && strings.EqualFold(tokens[start].Text, "callbacks")) {
+		return "", nil, start, false
+	}
+
+	if tokens[start+1].Kind != "symbol" || tokens[start+1].Text != "." {
+		return "", nil, start, false
+	}
+
+	if tokens[start+2].Kind != "ident" {
+		return "", nil, start, false
+	}
+
+	method := strings.ToLower(tokens[start+2].Text)
+	if method != "register" && method != "unregister" {
+		return "", nil, start, false
+	}
+
+	if tokens[start+3].Kind != "symbol" || tokens[start+3].Text != "(" {
+		return "", nil, start, false
+	}
+
+	args, endIndex := collectLuaCallArgs(tokens, start+3)
+	if endIndex <= start+3 {
+		return "", nil, start, false
+	}
+
+	return method, args, endIndex, true
+}
+
+func collectLuaCallArgs(tokens []luaToken, openParenIndex int) ([][]luaToken, int) {
+	args := make([][]luaToken, 0)
+	currentArg := make([]luaToken, 0)
+	parenDepth := 0
+	braceDepth := 0
+	bracketDepth := 0
+
+	for i := openParenIndex; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tok.Kind == "symbol" {
+			switch tok.Text {
+			case "(":
+				parenDepth++
+				if parenDepth > 1 {
+					currentArg = append(currentArg, tok)
+				}
+				continue
+			case ")":
+				if parenDepth == 1 {
+					if len(currentArg) > 0 {
+						args = append(args, trimLuaArgTokens(currentArg))
+					}
+					return args, i
+				}
+				if parenDepth > 1 {
+					currentArg = append(currentArg, tok)
+				}
+				parenDepth--
+				continue
+			case "{":
+				braceDepth++
+			case "}":
+				if braceDepth > 0 {
+					braceDepth--
+				}
+			case "[":
+				bracketDepth++
+			case "]":
+				if bracketDepth > 0 {
+					bracketDepth--
+				}
+			case ",":
+				if parenDepth == 1 && braceDepth == 0 && bracketDepth == 0 {
+					args = append(args, trimLuaArgTokens(currentArg))
+					currentArg = make([]luaToken, 0)
+					continue
+				}
+			}
+		}
+
+		if parenDepth >= 1 {
+			currentArg = append(currentArg, tok)
+		}
+	}
+
+	return args, openParenIndex
+}
+
+func trimLuaArgTokens(arg []luaToken) []luaToken {
+	if len(arg) == 0 {
+		return arg
+	}
+
+	start := 0
+	end := len(arg)
+	for start < end && arg[start].Kind == "whitespace" {
+		start++
+	}
+	for end > start && arg[end-1].Kind == "whitespace" {
+		end--
+	}
+
+	if start >= end {
+		return []luaToken{}
+	}
+
+	return arg[start:end]
+}
+
+func stringArgValue(args [][]luaToken, index int) string {
+	if index < 0 || index >= len(args) {
+		return ""
+	}
+
+	arg := args[index]
+	if len(arg) != 1 {
+		return ""
+	}
+	if arg[0].Kind != "string" {
+		return ""
+	}
+
+	return arg[0].Text
+}
+
+func tokenizeLua(content string) ([]luaToken, error) {
+	tokens := make([]luaToken, 0, len(content)/3)
+
+	runes := []rune(content)
+	line := 1
+
+	for i := 0; i < len(runes); {
+		ch := runes[i]
+
+		if ch == '\n' {
+			line++
+			i++
+			continue
+		}
+
+		if ch == ' ' || ch == '\t' || ch == '\r' {
+			i++
+			continue
+		}
+
+		if ch == '-' && i+1 < len(runes) && runes[i+1] == '-' {
+			i += 2
+			if openLen, ok := detectLuaLongBracketOpen(runes, i); ok {
+				i += openLen
+				for i < len(runes) {
+					if runes[i] == '\n' {
+						line++
+					}
+					if closeLen, closed := detectLuaLongBracketClose(runes, i, openLen); closed {
+						i += closeLen
+						break
+					}
+					i++
+				}
+				continue
+			}
+
+			for i < len(runes) && runes[i] != '\n' {
+				i++
+			}
+			continue
+		}
+
+		if ch == '\'' || ch == '"' {
+			quote := ch
+			startLine := line
+			i++
+			var builder strings.Builder
+			for i < len(runes) {
+				if runes[i] == '\n' {
+					line++
+				}
+				if runes[i] == '\\' && i+1 < len(runes) {
+					builder.WriteRune(runes[i])
+					builder.WriteRune(runes[i+1])
+					i += 2
+					continue
+				}
+				if runes[i] == quote {
+					i++
+					break
+				}
+				builder.WriteRune(runes[i])
+				i++
+			}
+			tokens = append(tokens, luaToken{Kind: "string", Text: builder.String(), Line: startLine})
+			continue
+		}
+
+		if openLen, ok := detectLuaLongBracketOpen(runes, i); ok {
+			startLine := line
+			i += openLen
+			var builder strings.Builder
+			for i < len(runes) {
+				if runes[i] == '\n' {
+					line++
+				}
+				if closeLen, closed := detectLuaLongBracketClose(runes, i, openLen); closed {
+					i += closeLen
+					break
+				}
+				builder.WriteRune(runes[i])
+				i++
+			}
+			tokens = append(tokens, luaToken{Kind: "string", Text: builder.String(), Line: startLine})
+			continue
+		}
+
+		if isLuaIdentifierStart(ch) {
+			start := i
+			startLine := line
+			i++
+			for i < len(runes) && isLuaIdentifierPart(runes[i]) {
+				i++
+			}
+			text := string(runes[start:i])
+			kind := "ident"
+			if isLuaKeyword(text) {
+				kind = "keyword"
+			}
+			tokens = append(tokens, luaToken{Kind: kind, Text: text, Line: startLine})
+			continue
+		}
+
+		if ch == '.' || ch == '(' || ch == ')' || ch == ',' || ch == '{' || ch == '}' || ch == '[' || ch == ']' {
+			tokens = append(tokens, luaToken{Kind: "symbol", Text: string(ch), Line: line})
+			i++
+			continue
+		}
+
+		i++
+	}
+
+	return tokens, nil
+}
+
+func detectLuaLongBracketOpen(runes []rune, index int) (int, bool) {
+	if index >= len(runes) || runes[index] != '[' {
+		return 0, false
+	}
+
+	i := index + 1
+	for i < len(runes) && runes[i] == '=' {
+		i++
+	}
+
+	if i < len(runes) && runes[i] == '[' {
+		return i - index + 1, true
+	}
+
+	return 0, false
+}
+
+func detectLuaLongBracketClose(runes []rune, index, openLen int) (int, bool) {
+	if index >= len(runes) || runes[index] != ']' {
+		return 0, false
+	}
+
+	eqCount := openLen - 2
+	if eqCount < 0 {
+		eqCount = 0
+	}
+
+	i := index + 1
+	for j := 0; j < eqCount; j++ {
+		if i >= len(runes) || runes[i] != '=' {
+			return 0, false
+		}
+		i++
+	}
+
+	if i < len(runes) && runes[i] == ']' {
+		return i - index + 1, true
+	}
+
+	return 0, false
+}
+
+func isLuaIdentifierStart(ch rune) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+}
+
+func isLuaIdentifierPart(ch rune) bool {
+	return isLuaIdentifierStart(ch) || (ch >= '0' && ch <= '9')
+}
+
+func isLuaKeyword(text string) bool {
+	switch text {
+	case "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while":
+		return true
+	default:
+		return false
+	}
 }
 
 func searchRoots() []string {
@@ -1576,6 +2163,29 @@ func findLuac() string {
 		"luac5.5",
 		"luac55",
 		"luac",
+	}
+
+	for _, candidate := range candidates {
+		if filepath.IsAbs(candidate) {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		} else {
+			if _, err := exec.LookPath(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+
+	return ""
+}
+
+func findLuacheck() string {
+	candidates := []string{
+		filepath.Join(filepath.Dir(os.Args[0]), "automations", "bin", "luacheck", "luacheck.exe"),
+		filepath.Join(filepath.Dir(os.Args[0]), "automations", "bin", "luacheck", "luacheck"),
+		"luacheck",
+		"luacheck.exe",
 	}
 
 	for _, candidate := range candidates {
