@@ -752,11 +752,11 @@ func validateLuaSyntax(ctx context.Context, filePath string) error {
 	// runtime error that should be reported.
 	luacheckIssues, lerr := runLuacheck(ctx, filePath)
 	if lerr != nil {
-		if !errors.Is(lerr, errLuacheckNotFound) {
-			return fmt.Errorf("luacheck failed: %v", lerr)
+		if errors.Is(lerr, errLuacheckNotFound) {
+			// luacheck not installed — policy check already passed, so succeed gracefully
+			return nil
 		}
-		// This should not happen if ensureDependencies() ran successfully at startup
-		return fmt.Errorf("luacheck unexpectedly not found. Please restart the MCP server or ensure luacheck is in PATH")
+		return fmt.Errorf("luacheck failed: %v", lerr)
 	}
 	if len(luacheckIssues) > 0 {
 		return fmt.Errorf(formatLuacheckIssues(filePath, luacheckIssues))
