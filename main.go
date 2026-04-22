@@ -2181,9 +2181,8 @@ func ensureDependencies() error {
 
 	if luacheckPath == "" {
 		log.Printf("luacheck not found, attempting auto-install...")
-		if err := runSetupScript(scriptDir, "install_luacheck.py"); err != nil {
+		if err := installLuacheck(scriptDir); err != nil {
 			log.Printf("⚠ luacheck auto-install failed (non-critical): %v", err)
-			log.Printf("You can install manually: pip install luacheck OR npm install -g luacheck")
 			// Don't fail here - luacheck is optional for MCP functionality
 		} else {
 			log.Printf("✓ luacheck installed successfully")
@@ -2191,6 +2190,50 @@ func ensureDependencies() error {
 	}
 
 	return nil
+}
+
+func installLuacheck(scriptDir string) error {
+	// Strategy 1: Python setup script
+	pythonBin := findPython()
+	if _, err := exec.LookPath(pythonBin); err == nil {
+		scriptPath := filepath.Join(scriptDir, "install_luacheck.py")
+		if _, serr := os.Stat(scriptPath); serr == nil {
+			cmd := exec.Command(pythonBin, scriptPath)
+			if out, err := cmd.CombinedOutput(); err == nil {
+				log.Printf("luacheck install (python script) output:\n%s", string(out))
+				return nil
+			}
+			log.Printf("Python install script failed, trying next method...")
+		}
+	}
+
+	// Strategy 2: npm install -g luacheck
+	if _, err := exec.LookPath("npm"); err == nil {
+		log.Printf("Trying: npm install -g luacheck")
+		cmd := exec.Command("npm", "install", "-g", "luacheck")
+		out, err := cmd.CombinedOutput()
+		log.Printf("npm output:\n%s", string(out))
+		if err == nil {
+			return nil
+		}
+		log.Printf("npm install failed: %v, trying next method...", err)
+	}
+
+	// Strategy 3: pip install luacheck
+	for _, pip := range []string{"pip3", "pip"} {
+		if _, err := exec.LookPath(pip); err == nil {
+			log.Printf("Trying: %s install luacheck", pip)
+			cmd := exec.Command(pip, "install", "luacheck")
+			out, err := cmd.CombinedOutput()
+			log.Printf("%s output:\n%s", pip, string(out))
+			if err == nil {
+				return nil
+			}
+			log.Printf("%s install failed: %v", pip, err)
+		}
+	}
+
+	return fmt.Errorf("all install methods failed. Install manually: npm install -g luacheck  OR  pip install luacheck")
 }
 
 func runSetupScript(scriptDir, scriptName string) error {
