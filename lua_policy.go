@@ -8,22 +8,23 @@ import (
 )
 
 type LboxMutationPolicy struct {
-	RequireDepthZeroRegister    bool
-	RequireDepthZeroUnregister  bool
-	RequireKillSwitchOrder      bool
-	ForbidRuntimeUnregister     bool
-	ForbidCollectGarbage        bool
-	ForbidRequireInFunction     bool
-	ForbidGlobalTable           bool
-	ForbidCreateFontInFunction  bool
-	ForbidLegacyBitLibrary      bool
-	ForbidDeprecatedCallbacks   bool
-	ForbidAllowListener         bool
-	ForbidForceFullUpdate       bool
-	RequireDrawTextFontSetup    bool
-	ForbidWarpOutsideCreateMove bool
-	ForbidSuspiciousSetupBones  bool
-	ForbidIpairsOnFindByClass   bool
+	RequireDepthZeroRegister     bool
+	RequireDepthZeroUnregister   bool
+	RequireKillSwitchOrder       bool
+	ForbidRuntimeUnregister      bool
+	ForbidCollectGarbage         bool
+	ForbidRequireInFunction      bool
+	ForbidGlobalTable            bool
+	ForbidCreateFontInFunction   bool
+	ForbidLegacyBitLibrary       bool
+	ForbidDeprecatedCallbacks    bool
+	ForbidAllowListener          bool
+	ForbidForceFullUpdate        bool
+	RequireDrawTextFontSetup     bool
+	ForbidWarpOutsideCreateMove  bool
+	ForbidSuspiciousSetupBones   bool
+	ForbidIpairsOnFindByClass    bool
+	RequireIsValidOnCachedEntity bool
 }
 
 type luaPolicyViolation struct {
@@ -40,22 +41,23 @@ const (
 )
 
 var defaultLboxMutationPolicy = LboxMutationPolicy{
-	RequireDepthZeroRegister:    true,
-	RequireDepthZeroUnregister:  true,
-	RequireKillSwitchOrder:      true,
-	ForbidRuntimeUnregister:     true,
-	ForbidCollectGarbage:        true,
-	ForbidRequireInFunction:     true,
-	ForbidGlobalTable:           true,
-	ForbidCreateFontInFunction:  true,
-	ForbidLegacyBitLibrary:      true,
-	ForbidDeprecatedCallbacks:   true,
-	ForbidAllowListener:         true,
-	ForbidForceFullUpdate:       true,
-	RequireDrawTextFontSetup:    true,
-	ForbidWarpOutsideCreateMove: true,
-	ForbidSuspiciousSetupBones:  true,
-	ForbidIpairsOnFindByClass:   true,
+	RequireDepthZeroRegister:     true,
+	RequireDepthZeroUnregister:   true,
+	RequireKillSwitchOrder:       true,
+	ForbidRuntimeUnregister:      true,
+	ForbidCollectGarbage:         true,
+	ForbidRequireInFunction:      true,
+	ForbidGlobalTable:            true,
+	ForbidCreateFontInFunction:   true,
+	ForbidLegacyBitLibrary:       true,
+	ForbidDeprecatedCallbacks:    true,
+	ForbidAllowListener:          true,
+	ForbidForceFullUpdate:        true,
+	RequireDrawTextFontSetup:     true,
+	ForbidWarpOutsideCreateMove:  true,
+	ForbidSuspiciousSetupBones:   true,
+	ForbidIpairsOnFindByClass:    true,
+	RequireIsValidOnCachedEntity: true,
 }
 
 func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) ([]luaPolicyViolation, error) {
@@ -282,6 +284,9 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 	if policy.ForbidIpairsOnFindByClass {
 		violations = append(violations, findIpairsOnFindByClassViolations(content)...)
 	}
+	if policy.RequireIsValidOnCachedEntity {
+		violations = append(violations, findCachedEntityWithoutIsValidViolations(content, tokens)...)
+	}
 
 	return violations, nil
 }
@@ -473,4 +478,121 @@ func findIpairsOnFindByClassViolations(content string) []luaPolicyViolation {
 	}
 
 	return dedupeLuaPolicyViolations(violations)
+}
+
+func findCachedEntityWithoutIsValidViolations(content string, tokens []luaToken) []luaPolicyViolation {
+	lines := strings.Split(content, "\n")
+	functionDepthByLine := buildFunctionDepthByLine(tokens)
+	topLevelDeclRe := regexp.MustCompile(`^\s*local\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:nil|false)?\s*$`)
+	entityAssignRe := regexp.MustCompile(`(?:^|[^\w])([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:entities\s*\.\s*(?:GetLocalPlayer|GetByIndex|GetByUserID|CreateEntityByName|CreateTempEntityByName)\s*\(|[A-Za-z_][A-Za-z0-9_]*\s*:\s*GetPropEntity\s*\()`)
+	methodCallTemplate := `\b%s\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(`
+	isValidGuardTemplate := `\b%s\s*:\s*IsValid\s*\(`
+
+	cachedCandidates := make(map[string]bool)
+	entityBackedVars := make(map[string]bool)
+	violations := make([]luaPolicyViolation, 0)
+
+	for i, line := range lines {
+		lineNumber := i + 1
+		if functionDepthByLine[lineNumber] == 0 {
+			if matches := topLevelDeclRe.FindStringSubmatch(line); len(matches) == 2 {
+				cachedCandidates[matches[1]] = true
+			}
+		}
+
+		if matches := entityAssignRe.FindAllStringSubmatch(line, -1); len(matches) > 0 {
+			for _, match := range matches {
+				if len(match) == 2 && cachedCandidates[match[1]] {
+					entityBackedVars[match[1]] = true
+				}
+			}
+		}
+
+		for varName := range entityBackedVars {
+			methodCallRe := regexp.MustCompile(fmt.Sprintf(methodCallTemplate, regexp.QuoteMeta(varName)))
+			callMatch := methodCallRe.FindStringSubmatch(line)
+			if len(callMatch) != 2 {
+				continue
+			}
+			methodName := callMatch[1]
+			if strings.EqualFold(methodName, "IsValid") {
+				continue
+			}
+			if cachedEntityUseHasIsValidGuard(lines, i, varName, isValidGuardTemplate) {
+				continue
+			}
+			violations = append(violations, luaPolicyViolation{
+				Line:    lineNumber,
+				Message: fmt.Sprintf("CRITICAL: cached entity '%s' is used across ticks without an IsValid() guard — stale entity handles can become invalid before methods like :%s() are called", varName, methodName),
+			})
+		}
+	}
+
+	return dedupeLuaPolicyViolations(violations)
+}
+
+func buildFunctionDepthByLine(tokens []luaToken) map[int]int {
+	depthByLine := make(map[int]int)
+	blockStack := make([]luaPolicyBlockKind, 0)
+	functionDepth := 0
+
+	for _, tok := range tokens {
+		if _, ok := depthByLine[tok.Line]; !ok {
+			depthByLine[tok.Line] = functionDepth
+		}
+		if tok.Kind != "keyword" {
+			continue
+		}
+		switch tok.Text {
+		case "function":
+			blockStack = append(blockStack, luaBlockFunction)
+			functionDepth++
+		case "if", "for", "while", "do":
+			blockStack = append(blockStack, luaBlockGeneric)
+		case "repeat":
+			blockStack = append(blockStack, luaBlockRepeat)
+		case "end":
+			if len(blockStack) > 0 {
+				for j := len(blockStack) - 1; j >= 0; j-- {
+					if blockStack[j] == luaBlockRepeat {
+						continue
+					}
+					if blockStack[j] == luaBlockFunction && functionDepth > 0 {
+						functionDepth--
+					}
+					blockStack = append(blockStack[:j], blockStack[j+1:]...)
+					break
+				}
+			}
+		case "until":
+			if len(blockStack) > 0 {
+				for j := len(blockStack) - 1; j >= 0; j-- {
+					if blockStack[j] == luaBlockRepeat {
+						blockStack = append(blockStack[:j], blockStack[j+1:]...)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return depthByLine
+}
+
+func cachedEntityUseHasIsValidGuard(lines []string, lineIndex int, varName string, isValidGuardTemplate string) bool {
+	guardRe := regexp.MustCompile(fmt.Sprintf(isValidGuardTemplate, regexp.QuoteMeta(varName)))
+	start := lineIndex - 2
+	if start < 0 {
+		start = 0
+	}
+	end := lineIndex
+	if end >= len(lines) {
+		end = len(lines) - 1
+	}
+	for i := start; i <= end; i++ {
+		if guardRe.MatchString(lines[i]) {
+			return true
+		}
+	}
+	return false
 }

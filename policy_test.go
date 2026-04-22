@@ -595,3 +595,79 @@ end
 		}
 	}
 }
+
+func TestCachedEntityWithoutIsValidRejected(t *testing.T) {
+	src := `
+local cached_weapon = nil
+
+callbacks.unregister("CreateMove", "cache_weapon")
+callbacks.register("CreateMove", "cache_weapon", function(cmd)
+    local me = entities.GetLocalPlayer()
+    cached_weapon = me:GetPropEntity("m_hActiveWeapon")
+    if cached_weapon then
+        print(cached_weapon:IsAlive())
+    end
+end)
+`
+	path := writeTempLua(t, "cached_entity_no_isvalid", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	found := false
+	for _, v := range violations {
+		if strings.Contains(v.Message, "cached entity 'cached_weapon'") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected cached entity IsValid violation, got: %+v", violations)
+	}
+}
+
+func TestCachedEntityWithIsValidAllowed(t *testing.T) {
+	src := `
+local cached_weapon = nil
+
+callbacks.unregister("CreateMove", "cache_weapon_ok")
+callbacks.register("CreateMove", "cache_weapon_ok", function(cmd)
+    local me = entities.GetLocalPlayer()
+    cached_weapon = me:GetPropEntity("m_hActiveWeapon")
+    if not cached_weapon or not cached_weapon:IsValid() then return end
+    print(cached_weapon:IsAlive())
+end)
+`
+	path := writeTempLua(t, "cached_entity_with_isvalid", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	for _, v := range violations {
+		if strings.Contains(v.Message, "cached entity 'cached_weapon'") {
+			t.Fatalf("unexpected cached entity IsValid violation: %+v", violations)
+		}
+	}
+}
+
+func TestNonCachedLocalEntityNotFlagged(t *testing.T) {
+	src := `
+callbacks.unregister("CreateMove", "temp_entity")
+callbacks.register("CreateMove", "temp_entity", function(cmd)
+    local me = entities.GetLocalPlayer()
+    if me and me:IsAlive() then
+        print(me:GetName())
+    end
+end)
+`
+	path := writeTempLua(t, "local_entity_temp", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	for _, v := range violations {
+		if strings.Contains(v.Message, "cached entity") {
+			t.Fatalf("unexpected cached entity violation for local temporary entity: %+v", violations)
+		}
+	}
+}
