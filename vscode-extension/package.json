@@ -1,25 +1,35 @@
 {
   "name": "lmaobox-context",
   "displayName": "Lmaobox Context",
-  "description": "Automatically installs and configures the Lmaobox MCP server runtime for VS Code.",
-  "version": "1.0.6",
+  "description": "Zero-config MCP server extension for Lmaobox Lua docs, types, bundling, and linting in VS Code.",
+  "version": "1.0.17",
   "publisher": "titaniummachine1",
   "license": "MIT",
   "engines": {
-    "vscode": "^1.95.0"
+    "vscode": "^1.96.0"
   },
   "categories": [
-    "Other",
+    "Chat",
     "Snippets"
   ],
   "keywords": [
     "mcp",
+    "mcp server",
+    "model context protocol",
     "lmaobox",
     "lua",
-    "copilot"
+    "copilot",
+    "ai tools",
+    "agent tools",
+    "windsurf",
+    "cursor"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "*",
+    "onStartupFinished",
+    "onLanguage:lua",
+    "onCommand:lmaoboxContext.installOrUpdateRuntime",
+    "onCommand:lmaoboxContext.syncExternalMcpConfigs"
   ],
   "main": "./extension.js",
   "extensionDependencies": [
@@ -44,6 +54,16 @@
       {
         "command": "lmaoboxContext.openBundledDocsFolder",
         "title": "Lmaobox Context: Open Bundled Docs Folder"
+      },
+      {
+        "command": "lmaoboxContext.syncExternalMcpConfigs",
+        "title": "Lmaobox Context: Sync External MCP Configs"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "lmaobox-provider",
+        "label": "Lmaobox Context"
       }
     ],
     "configuration": {
@@ -66,20 +86,35 @@
         },
         "lmaoboxContext.repoName": {
           "type": "string",
-          "default": "lmaobox-context-protocol",
+          "default": "Lmaobox_Context_Server",
           "description": "GitHub repository used when downloading the packaged runtime release."
+        },
+        "lmaoboxContext.autoInjectExternalMcpConfigs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically inject Lmaobox MCP server entries into external tool config files (Cursor/Windsurf/Claude) when runtime is installed."
+        },
+        "lmaoboxContext.externalMcpServerName": {
+          "type": "string",
+          "default": "lmaobox-context",
+          "description": "Server key used in external mcpServers JSON files."
+        },
+        "lmaoboxContext.externalMcpConfigPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to an additional MCP config JSON file to update (for custom editors)."
         }
       }
     }
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/titaniummachine1/lmaobox-context-protocol.git"
+    "url": "https://github.com/titaniummachine1/Lmaobox_Context_Server.git"
   },
   "bugs": {
-    "url": "https://github.com/titaniummachine1/lmaobox-context-protocol/issues"
+    "url": "https://github.com/titaniummachine1/Lmaobox_Context_Server/issues"
   },
-  "homepage": "https://github.com/titaniummachine1/lmaobox-context-protocol",
+  "homepage": "https://github.com/titaniummachine1/Lmaobox_Context_Server",
   "icon": "image.png",
   "dependencies": {
     "extract-zip": "^2.0.1"
