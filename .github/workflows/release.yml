@@ -99,6 +99,8 @@ jobs:
   publish-release:
     runs-on: ubuntu-latest
     needs: build-runtime
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
     steps:
       - name: Check out source
@@ -170,10 +172,8 @@ jobs:
             dist/*.vsix
 
       - name: Publish to VS Code Marketplace
-        if: ${{ secrets.VSCE_PAT != '' }}
+        if: ${{ env.VSCE_PAT != '' }}
         shell: bash
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./vscode-extension/package.json').version")
