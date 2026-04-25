@@ -12,6 +12,9 @@ dist/
 build/
 coverage/
 vscode-extension/*.vsix
+bundle_output/
+bundle_test_output/
+bundle_test_deploy/
 
 # Python
 __pycache__/
