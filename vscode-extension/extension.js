@@ -11,6 +11,7 @@ const MCP_PROVIDER_ID = 'lmaobox-provider';
 const SUMNEKO_EXTENSION_ID = 'sumneko.lua';
 let setupInFlightPromise;
 let setupInFlightOptions;
+let warnedInvalidReleaseTag = false;
 
 function activate(context) {
     context.subscriptions.push(
@@ -192,7 +193,7 @@ async function ensureInstalledAndConfigured(context, options) {
     };
 
     const releaseTag = getReleaseTag(context);
-    const hasTagOverride = getExtensionConfig().get('releaseTag', '').trim().length > 0;
+    const hasTagOverride = hasValidReleaseTagOverride();
     let effectiveTag = releaseTag;
     let runtimeDir = path.join(context.globalStorageUri.fsPath, 'runtime', effectiveTag);
     let serverPath = path.join(runtimeDir, getBinaryName());
@@ -426,10 +427,58 @@ function getExtensionConfig() {
 
 function getReleaseTag(context) {
     const override = getExtensionConfig().get('releaseTag', '').trim();
-    if (override) {
-        return override;
+    const normalizedOverride = normalizeReleaseTag(override);
+    if (normalizedOverride) {
+        return normalizedOverride;
     }
+
+    if (override) {
+        warnInvalidReleaseTag(override, context.extension.packageJSON.version);
+    }
+
     return `v${context.extension.packageJSON.version}`;
+}
+
+function hasValidReleaseTagOverride() {
+    const override = getExtensionConfig().get('releaseTag', '').trim();
+    return Boolean(normalizeReleaseTag(override));
+}
+
+function normalizeReleaseTag(rawTag) {
+    if (!rawTag) {
+        return '';
+    }
+
+    const cleaned = String(rawTag).trim().replace(/^refs\/tags\//i, '');
+    if (!cleaned) {
+        return '';
+    }
+
+    // Reject path-like values to prevent malformed release URLs like C:\Users\...
+    if (cleaned.includes('\\') || cleaned.includes('/') || cleaned.includes(':')) {
+        return '';
+    }
+
+    if (cleaned.length > 64 || /^\.+$/.test(cleaned)) {
+        return '';
+    }
+
+    if (!/^[A-Za-z0-9._-]+$/.test(cleaned)) {
+        return '';
+    }
+
+    return cleaned;
+}
+
+function warnInvalidReleaseTag(rawTag, suggestedVersion) {
+    const message = `Ignoring invalid lmaoboxContext.releaseTag value "${rawTag}". Use a GitHub tag like "v${suggestedVersion}".`;
+    console.warn(message);
+    if (warnedInvalidReleaseTag) {
+        return;
+    }
+
+    warnedInvalidReleaseTag = true;
+    void vscode.window.showWarningMessage(message);
 }
 
 function getBinaryName() {
@@ -619,7 +668,9 @@ async function computeSha256(filePath) {
 }
 
 async function downloadReleaseAsset(owner, repo, tag, assetName, destination) {
-    const url = `https://github.com/${owner}/${repo}/releases/download/${tag}/${assetName}`;
+    const encodedTag = encodeURIComponent(tag);
+    const encodedAssetName = encodeURIComponent(assetName);
+    const url = `https://github.com/${owner}/${repo}/releases/download/${encodedTag}/${encodedAssetName}`;
     const response = await downloadWithRedirects(url);
 
     if (response.statusCode !== 200) {
