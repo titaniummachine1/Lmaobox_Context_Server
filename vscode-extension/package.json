@@ -2,7 +2,7 @@
   "name": "lmaobox-context",
   "displayName": "Lmaobox Context",
   "description": "Automatically installs and configures the Lmaobox MCP server runtime for VS Code.",
-  "version": "1.0.6",
+  "version": "1.0.20",
   "publisher": "titaniummachine1",
   "license": "MIT",
   "engines": {
@@ -44,6 +44,10 @@
       {
         "command": "lmaoboxContext.openBundledDocsFolder",
         "title": "Lmaobox Context: Open Bundled Docs Folder"
+      },
+      {
+        "command": "lmaoboxContext.syncExternalMcpConfigs",
+        "title": "Lmaobox Context: Sync External MCP Configs"
       }
     ],
     "configuration": {
@@ -53,6 +57,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically write the MCP server entry into VS Code user settings after the runtime is installed."
+        },
+        "lmaoboxContext.autoInjectExternalMcpConfigs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically sync the MCP server entry into supported external MCP client config files such as Cursor, Windsurf, and Claude Desktop."
         },
         "lmaoboxContext.releaseTag": {
           "type": "string",
@@ -66,8 +75,18 @@
         },
         "lmaoboxContext.repoName": {
           "type": "string",
-          "default": "lmaobox-context-protocol",
+          "default": "Lmaobox_Context_Server",
           "description": "GitHub repository used when downloading the packaged runtime release."
+        },
+        "lmaoboxContext.externalMcpServerName": {
+          "type": "string",
+          "default": "lmaobox-context",
+          "description": "Server name to use when writing external MCP config files."
+        },
+        "lmaoboxContext.externalMcpConfigPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional extra MCP config file path to sync in addition to known tools."
         }
       }
     }

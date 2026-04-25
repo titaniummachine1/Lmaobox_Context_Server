@@ -11,6 +11,7 @@ automations/.cache/
 dist/
 build/
 coverage/
+vscode-extension/*.vsix
 
 # Python
 __pycache__/
