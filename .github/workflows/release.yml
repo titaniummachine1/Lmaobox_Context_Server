@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -97,6 +101,53 @@ jobs:
     needs: build-runtime
 
     steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Verify extension version matches tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          EXPECTED_TAG="v${PACKAGE_VERSION}"
+          if [ "${RELEASE_TAG}" != "${EXPECTED_TAG}" ]; then
+            echo "Release tag ${RELEASE_TAG} does not match vscode-extension version ${PACKAGE_VERSION}."
+            exit 1
+          fi
+
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Sync bundled assets into extension package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf vscode-extension/assets/types vscode-extension/assets/smart_context
+          mkdir -p vscode-extension/assets
+          cp -R types vscode-extension/assets/types
+          if [ -d data/smart_context ]; then
+            cp -R data/smart_context vscode-extension/assets/smart_context
+          else
+            cp -R smart_context vscode-extension/assets/smart_context
+          fi
+
+      - name: Package VSIX
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          mkdir -p dist
+          cd vscode-extension
+          npx --yes @vscode/vsce package -o "../dist/lmaobox-context-${VERSION}.vsix"
+
       - name: Download packaged runtimes
         uses: actions/download-artifact@v4
         with:
@@ -116,3 +167,14 @@ jobs:
           files: |
             dist/*.zip
             dist/checksums.txt
+            dist/*.vsix
+
+      - name: Publish to VS Code Marketplace
+        if: ${{ secrets.VSCE_PAT != '' }}
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          npx --yes @vscode/vsce publish --packagePath "dist/lmaobox-context-${VERSION}.vsix"

@@ -1,9 +1,6 @@
 name: Package Or Publish VS Code Extension
 
 on:
-  release:
-    types:
-      - published
   workflow_dispatch:
     inputs:
       release_tag:
@@ -32,7 +29,7 @@ jobs:
 
       - name: Install extension dependencies
         working-directory: vscode-extension
-        run: npm install
+        run: npm ci
 
       - name: Sync bundled assets into extension package
         shell: bash
@@ -50,7 +47,7 @@ jobs:
       - name: Verify extension version matches release tag
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           if [ -z "${RELEASE_TAG}" ]; then
@@ -67,8 +64,6 @@ jobs:
 
       - name: Package VSIX
         shell: bash
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./vscode-extension/package.json').version")
@@ -77,9 +72,12 @@ jobs:
           npx --yes @vscode/vsce package -o "../dist/lmaobox-context-${VERSION}.vsix"
 
       - name: Attach VSIX to GitHub release
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ inputs.release_tag != '' }}
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: dist/*.vsix
 
       - name: Publish to VS Code Marketplace
