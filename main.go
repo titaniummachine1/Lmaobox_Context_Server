@@ -400,10 +400,13 @@ func bundleLuaProject(ctx context.Context, projectDir, entryFile, bundleOutputDi
 		return "", fmt.Errorf("failed to write bundle: %v", err)
 	}
 
-	// Final validation: run luac on the bundled output to catch any merge-time
-	// syntax issues. Policy checks and luacheck already ran on each source file.
-	if luacErr := runLuacOnly(ctx, bundlePath); luacErr != nil {
-		return "", fmt.Errorf("bundled file failed final syntax check: %v", luacErr)
+	// Final validation: apply full heuristics (luac + Zero-Mutation policy +
+	// luacheck) to the merged bundle.  This reuses the same heuristic functions
+	// as per-file validation and catches merge-time issues such as a module that
+	// incorrectly registers callbacks at its source top-level (which becomes a
+	// nested function in the bundle -- a real runtime problem).
+	if err := validateBundledLua(ctx, bundlePath); err != nil {
+		return "", fmt.Errorf("bundled file failed validation: %v", err)
 	}
 
 	// Write line-map alongside the bundle for traceback lookups
@@ -2102,8 +2105,8 @@ func scoreSnippetCandidate(queryLower string, tokens []string, combinedLower, sy
 // ── end smart_search ─────────────────────────────────────────────────────────
 
 // runLuacOnly runs the Lua compiler syntax check (-p) on the given file without
-// executing the Zero-Mutation policy or luacheck passes.  This is used for the
-// final bundle validation where per-file checks have already been done.
+// executing the Zero-Mutation policy or luacheck passes.  This is used as the
+// first step of validateBundledLua.
 func runLuacOnly(ctx context.Context, filePath string) error {
 	luacPath := findLuac()
 	if luacPath == "" {
@@ -2114,6 +2117,91 @@ func runLuacOnly(ctx context.Context, filePath string) error {
 	if err != nil {
 		return fmt.Errorf("syntax error: %s", strings.TrimSpace(string(output)))
 	}
+	return nil
+}
+
+// runLuacheckWithGlobals is like runLuacheck but accepts extra global names that
+// are passed to luacheck via --globals.  This prevents false "undefined global"
+// warnings for symbols that are defined inline in the file (e.g. bundle
+// infrastructure variables like __bundle_modules).
+func runLuacheckWithGlobals(ctx context.Context, filePath string, extraGlobals []string) ([]string, error) {
+	luacheckPath := findLuacheck()
+	if luacheckPath == "" {
+		return nil, errLuacheckNotFound
+	}
+
+	args := []string{"--no-color", "--codes"}
+	for _, g := range extraGlobals {
+		args = append(args, "--globals", g)
+	}
+	args = append(args, filePath)
+
+	cmd := exec.CommandContext(ctx, luacheckPath, args...)
+	output, err := cmd.CombinedOutput()
+	if len(output) == 0 && err != nil {
+		return nil, fmt.Errorf("luacheck execution failed: %v", err)
+	}
+
+	raw := strings.TrimSpace(string(output))
+	if raw == "" {
+		return nil, nil
+	}
+
+	lines := strings.Split(raw, "\n")
+	issues := make([]string, 0, len(lines))
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		issues = append(issues, l)
+	}
+
+	return issues, nil
+}
+
+// validateBundledLua applies the full heuristic validation suite to the final
+// bundled Lua file, reusing the same functions used for per-file validation:
+//
+//  1. luac syntax check (runLuacOnly)
+//  2. Zero-Mutation policy check (checkLuaCallbackMutationPolicy with
+//     bundleMutationPolicy -- same function, bundle-safe policy variant)
+//  3. luacheck lint (runLuacheckWithGlobals -- same core logic as runLuacheck,
+//     with bundle infrastructure globals declared to suppress false positives)
+//
+// This is intentionally not lightweight: it is the last safety net before
+// deployment and is meant to catch mistakes that per-file validation cannot
+// (e.g. a module that registers callbacks at its source top-level, which in the
+// bundle becomes nested inside a wrapper function -- a real runtime problem).
+func validateBundledLua(ctx context.Context, filePath string) error {
+	// Step 1: syntax
+	if err := runLuacOnly(ctx, filePath); err != nil {
+		return fmt.Errorf("bundled file syntax error: %v", err)
+	}
+
+	// Step 2: Zero-Mutation / heuristic policy (reused function, bundle policy variant)
+	violations, err := checkLuaCallbackMutationPolicy(filePath, bundleMutationPolicy)
+	if err != nil {
+		return fmt.Errorf("policy check on bundle failed: %v", err)
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf(formatLuaPolicyViolations(filePath, violations))
+	}
+
+	// Step 3: luacheck (reused core logic; bundle infrastructure globals declared
+	// to avoid false "undefined global" warnings for __bundle_* variables).
+	bundleGlobals := []string{"__bundle_modules", "__bundle_require", "__bundle_loaded"}
+	luacheckIssues, lerr := runLuacheckWithGlobals(ctx, filePath, bundleGlobals)
+	if lerr != nil {
+		if errors.Is(lerr, errLuacheckNotFound) {
+			return nil // luacheck not installed -- policy check already passed
+		}
+		return fmt.Errorf("luacheck on bundle failed: %v", lerr)
+	}
+	if len(luacheckIssues) > 0 {
+		return fmt.Errorf(formatLuacheckIssues(filePath, luacheckIssues))
+	}
+
 	return nil
 }
 

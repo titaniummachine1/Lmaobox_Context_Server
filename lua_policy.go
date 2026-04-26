@@ -88,6 +88,18 @@ var defaultLboxMutationPolicy = LboxMutationPolicy{
 	RequireIsValidOnCachedEntity: true,
 }
 
+// bundleMutationPolicy is used for the final validation pass on the merged
+// bundle file.  It is identical to defaultLboxMutationPolicy except that
+// ForbidRequireInFunction is disabled: the bundler wraps each module inside a
+// closure, so any top-level require() calls for global (non-bundled) modules
+// appear to the policy scanner as if they are inside a function -- which is
+// expected and harmless in the bundle context.  All other rules remain active.
+var bundleMutationPolicy = func() LboxMutationPolicy {
+	p := defaultLboxMutationPolicy
+	p.ForbidRequireInFunction = false // module wrappers make top-level requires appear in a function
+	return p
+}()
+
 func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) ([]luaPolicyViolation, error) {
 	contentBytes, err := os.ReadFile(filePath)
 	if err != nil {

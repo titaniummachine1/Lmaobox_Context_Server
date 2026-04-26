@@ -682,3 +682,96 @@ func TestResolveBundleMapPathFile(t *testing.T) {
 		t.Fatalf("got %s, want %s", got, mapFile)
 	}
 }
+
+// ── Bundle Policy / Full Heuristics Tests ────────────────────────────────────
+
+// TestBundlePolicyAllowsRequireInWrapper verifies that bundleMutationPolicy
+// does NOT flag require() inside a module wrapper function (the bundle format
+// wraps every module in a closure, so this would be a false positive).
+func TestBundlePolicyAllowsRequireInWrapper(t *testing.T) {
+	// Simulate what the bundler produces for a module with a global require:
+	// the module content appears inside __bundle_modules["name"] = function() ... end
+	src := `
+local __bundle_modules = {}
+local __bundle_loaded = {}
+local function __bundle_require(name)
+    local loader = __bundle_modules[name]
+    if loader == nil then return require(name) end
+    local cached = __bundle_loaded[name]
+    if cached ~= nil then return cached end
+    local loaded = loader()
+    if loaded == nil then loaded = true end
+    __bundle_loaded[name] = loaded
+    return loaded
+end
+
+__bundle_modules["utils"] = function()
+    local globalLib = require("SomeGlobalLib")
+    local M = {}
+    function M.hello() return globalLib.greet() end
+    return M
+end
+
+local running = true
+callbacks.unregister("Draw", "MyLoop")
+callbacks.register("Draw", "MyLoop", function()
+    if not running then return end
+end)
+callbacks.register("Unload", function()
+    running = false
+end)
+`
+	path := createTempLuaFile(t, "bundle_policy_require", src)
+
+	violations, err := checkLuaCallbackMutationPolicy(path, bundleMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+
+	// bundleMutationPolicy must not flag require() inside the module wrapper
+	for _, v := range violations {
+		if strings.Contains(v.Message, "require()") {
+			t.Fatalf("bundleMutationPolicy should not flag require() in bundle wrapper, got: %s", v.Message)
+		}
+	}
+}
+
+// TestBundlePolicyStillCatchesCallbackViolation verifies that bundleMutationPolicy
+// still flags a module that registers a callback at its source top-level (which
+// in the bundle becomes nested inside the module wrapper function -- a real issue).
+func TestBundlePolicyStillCatchesCallbackViolation(t *testing.T) {
+	// A module that had callbacks.register at its source top-level becomes wrapped:
+	src := `
+local __bundle_modules = {}
+local __bundle_loaded = {}
+local function __bundle_require(name)
+    if __bundle_modules[name] == nil then return require(name) end
+    local cached = __bundle_loaded[name]; if cached ~= nil then return cached end
+    local loaded = __bundle_modules[name](); if loaded == nil then loaded = true end
+    __bundle_loaded[name] = loaded; return loaded
+end
+
+__bundle_modules["badmodule"] = function()
+    callbacks.register("Draw", "BadDraw", function() end)
+end
+
+-- Entry point has proper kill-switch
+local running = true
+callbacks.unregister("Draw", "MyMain")
+callbacks.register("Draw", "MyMain", function()
+    if not running then return end
+end)
+callbacks.register("Unload", function() running = false end)
+`
+	path := createTempLuaFile(t, "bundle_policy_callback_violation", src)
+
+	violations, err := checkLuaCallbackMutationPolicy(path, bundleMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+
+	// Should catch that callbacks.register is inside a function (module wrapper)
+	if len(violations) == 0 {
+		t.Fatal("bundleMutationPolicy should still flag callbacks.register inside the module wrapper function")
+	}
+}
