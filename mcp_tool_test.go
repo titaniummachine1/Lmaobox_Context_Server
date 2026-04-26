@@ -502,3 +502,183 @@ local x = _G.someGlobal
 		t.Fatalf("expected _G dot-access violation")
 	}
 }
+
+// ── Traceback / Line-Map Tests ───────────────────────────────────────────────
+
+// TestCountLuaLines verifies line counting for content with/without trailing newline.
+func TestCountLuaLines(t *testing.T) {
+	cases := []struct {
+		content string
+		want    int
+	}{
+		{"", 0},
+		{"\n", 1},
+		{"a\n", 1},
+		{"a\nb\n", 2},
+		{"a\nb\nc\n", 3},
+		{"a\nb\nc", 3}, // no trailing newline
+		{"a", 1},
+	}
+	for _, c := range cases {
+		got := countLuaLines(c.content)
+		if got != c.want {
+			t.Errorf("countLuaLines(%q) = %d, want %d", c.content, got, c.want)
+		}
+	}
+}
+
+// TestLookupBundleLineInRange verifies that a line inside a mapped range resolves correctly.
+func TestLookupBundleLineInRange(t *testing.T) {
+	entries := []LineMapEntry{
+		{BundledStart: 10, BundledEnd: 19, SourceFile: "utils.lua", SourceStart: 1},
+		{BundledStart: 25, BundledEnd: 34, SourceFile: "main.lua", SourceStart: 1},
+	}
+
+	// Line 10 → utils.lua:1
+	e, sl, found := lookupBundleLine(entries, 10)
+	if !found || e.SourceFile != "utils.lua" || sl != 1 {
+		t.Fatalf("line 10: got (%s:%d, found=%v), want (utils.lua:1, true)", e.SourceFile, sl, found)
+	}
+
+	// Line 15 → utils.lua:6
+	e, sl, found = lookupBundleLine(entries, 15)
+	if !found || e.SourceFile != "utils.lua" || sl != 6 {
+		t.Fatalf("line 15: got (%s:%d, found=%v), want (utils.lua:6, true)", e.SourceFile, sl, found)
+	}
+
+	// Line 19 → utils.lua:10
+	e, sl, found = lookupBundleLine(entries, 19)
+	if !found || e.SourceFile != "utils.lua" || sl != 10 {
+		t.Fatalf("line 19: got (%s:%d, found=%v), want (utils.lua:10, true)", e.SourceFile, sl, found)
+	}
+
+	// Line 25 → main.lua:1
+	e, sl, found = lookupBundleLine(entries, 25)
+	if !found || e.SourceFile != "main.lua" || sl != 1 {
+		t.Fatalf("line 25: got (%s:%d, found=%v), want (main.lua:1, true)", e.SourceFile, sl, found)
+	}
+}
+
+// TestLookupBundleLineInfrastructure verifies that boilerplate lines return not-found.
+func TestLookupBundleLineInfrastructure(t *testing.T) {
+	entries := []LineMapEntry{
+		{BundledStart: 30, BundledEnd: 39, SourceFile: "utils.lua", SourceStart: 1},
+	}
+
+	// Lines before any mapped entry (bundle header boilerplate)
+	_, _, found := lookupBundleLine(entries, 1)
+	if found {
+		t.Fatal("expected line 1 (infrastructure) to not be found in map")
+	}
+
+	// Line between entries (module wrapper)
+	_, _, found = lookupBundleLine(entries, 25)
+	if found {
+		t.Fatal("expected line 25 (infrastructure gap) to not be found in map")
+	}
+}
+
+// TestGenerateBundledLuaLineMap verifies that generateBundledLua produces a line
+// map where every claimed source line lookups round-trips correctly.
+func TestGenerateBundledLuaLineMap(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create two simple modules
+	utilContent := "local M = {}\nfunction M.hello() return 'hi' end\nreturn M\n"
+	mainContent := "local utils = require('utils')\nprint(utils.hello())\n"
+
+	utilPath := filepath.Join(dir, "utils.lua")
+	mainPath := filepath.Join(dir, "Main.lua")
+	if err := os.WriteFile(utilPath, []byte(utilContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bundleCtx := &BundleContext{
+		ProjectDir:  dir,
+		SearchPaths: []string{dir},
+		Modules: map[string]*LuaModule{
+			utilPath: {FilePath: utilPath, Content: utilContent, Requires: nil},
+			mainPath: {FilePath: mainPath, Content: mainContent, Requires: []string{"utils"}},
+		},
+		Visited: map[string]bool{},
+		Stack:   map[string]bool{},
+	}
+
+	bundledContent, entries, err := generateBundledLua(bundleCtx, mainPath)
+	if err != nil {
+		t.Fatalf("generateBundledLua error: %v", err)
+	}
+
+	if len(bundledContent) == 0 {
+		t.Fatal("expected non-empty bundled content")
+	}
+
+	if len(entries) == 0 {
+		t.Fatal("expected at least one line map entry")
+	}
+
+	// Every entry range must be consistent: BundledEnd >= BundledStart
+	for _, e := range entries {
+		if e.BundledEnd < e.BundledStart {
+			t.Errorf("entry for %s has BundledEnd(%d) < BundledStart(%d)", e.SourceFile, e.BundledEnd, e.BundledStart)
+		}
+		if e.SourceStart != 1 {
+			t.Errorf("entry for %s has SourceStart=%d, want 1", e.SourceFile, e.SourceStart)
+		}
+	}
+
+	// The total bundled lines must fit within the bundled content
+	totalBundledLines := countLuaLines(bundledContent)
+	for _, e := range entries {
+		if e.BundledEnd > totalBundledLines {
+			t.Errorf("entry BundledEnd(%d) exceeds total bundled lines(%d) for %s", e.BundledEnd, totalBundledLines, e.SourceFile)
+		}
+	}
+}
+
+// TestResolveBundleMapPathDirectory verifies that passing a directory resolves
+// to build/Main.lua.map when it exists.
+func TestResolveBundleMapPathDirectory(t *testing.T) {
+	dir := t.TempDir()
+	buildDir := filepath.Join(dir, "build")
+	if err := os.MkdirAll(buildDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mapFile := filepath.Join(buildDir, "Main.lua.map")
+	if err := os.WriteFile(mapFile, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveBundleMapPath(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != mapFile {
+		t.Fatalf("got %s, want %s", got, mapFile)
+	}
+}
+
+// TestResolveBundleMapPathFile verifies that passing the bundle .lua file
+// resolves to the adjacent .map file when it exists.
+func TestResolveBundleMapPathFile(t *testing.T) {
+	dir := t.TempDir()
+	luaFile := filepath.Join(dir, "Main.lua")
+	mapFile := luaFile + ".map"
+	if err := os.WriteFile(luaFile, []byte("-- bundle"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mapFile, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveBundleMapPath(luaFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != mapFile {
+		t.Fatalf("got %s, want %s", got, mapFile)
+	}
+}
