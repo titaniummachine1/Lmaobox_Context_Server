@@ -413,7 +413,11 @@ func bundleLuaProject(ctx context.Context, projectDir, entryFile, bundleOutputDi
 		Entries:    mapEntries,
 	}
 	if mapData, merr := json.Marshal(lineMap); merr == nil {
-		_ = os.WriteFile(bundlePath+".map", mapData, 0644)
+		if werr := os.WriteFile(bundlePath+".map", mapData, 0644); werr != nil {
+			log.Printf("warning: failed to write bundle map file %s.map: %v (traceback tool will not work for this bundle)", bundlePath, werr)
+		}
+	} else {
+		log.Printf("warning: failed to serialize bundle map: %v (traceback tool will not work for this bundle)", merr)
 	}
 
 	// Deploy bundle
@@ -2103,7 +2107,7 @@ func scoreSnippetCandidate(queryLower string, tokens []string, combinedLower, sy
 func runLuacOnly(ctx context.Context, filePath string) error {
 	luacPath := findLuac()
 	if luacPath == "" {
-		return nil // no compiler available – skip silently like validateLuaSyntax does
+		return nil // no compiler available -- skip silently like validateLuaSyntax does
 	}
 	cmd := exec.CommandContext(ctx, luacPath, "-p", filePath)
 	output, err := cmd.CombinedOutput()
@@ -2199,7 +2203,7 @@ func handleTraceback(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToo
 	sb.WriteString(fmt.Sprintf("## traceback: bundled line %d\n\n", bundledLine))
 	sb.WriteString(fmt.Sprintf("**Source file:** `%s`\n", relPath))
 	sb.WriteString(fmt.Sprintf("**Source line:** %d\n", sourceLine))
-	sb.WriteString(fmt.Sprintf("**Bundle range:** lines %d–%d map to `%s`\n", entry.BundledStart, entry.BundledEnd, relPath))
+	sb.WriteString(fmt.Sprintf("**Bundle range:** lines %d-%d map to `%s`\n", entry.BundledStart, entry.BundledEnd, relPath))
 
 	// Optionally show the source line content
 	if srcBytes, rerr := os.ReadFile(entry.SourceFile); rerr == nil {
