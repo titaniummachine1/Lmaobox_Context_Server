@@ -47,16 +47,39 @@ elseif ($EditorConfigPath) {
     $Settings = Get-Content $EditorConfigPath -Raw | ConvertFrom-Json
     
     if (-not $Settings.modelContextProtocol) {
-        $Settings | Add-Member modelContextProtocol @{ servers = @{} }
+        $Settings | Add-Member -MemberType NoteProperty -Name modelContextProtocol -Value (@{ servers = @{} })
     }
     if (-not $Settings.modelContextProtocol.servers) {
-        $Settings.modelContextProtocol | Add-Member servers @{}
+        $Settings.modelContextProtocol | Add-Member -MemberType NoteProperty -Name servers -Value @{}
     }
 
     $Settings.modelContextProtocol.servers."lmaobox-context" = $ServerConfig
-    $Settings | ConvertTo-Json -Depth 32 | Out-File $EditorConfigPath -Encoding UTF8
-    
-    Write-Host "Done! Restart your editor now."
+
+    # Ensure Lua workspace settings include the repo "types" library so Sumneko/Other LSPs use our annotations
+    if (-not $Settings.PSObject.Properties['Lua']) {
+        $Settings | Add-Member -MemberType NoteProperty -Name Lua -Value @{}
+    }
+    if (-not $Settings.Lua.PSObject.Properties['workspace']) {
+        $Settings.Lua | Add-Member -MemberType NoteProperty -Name workspace -Value @{}
+    }
+    if (-not $Settings.Lua.workspace.PSObject.Properties['library']) {
+        $Settings.Lua.workspace | Add-Member -MemberType NoteProperty -Name library -Value @{}
+    }
+
+    # Use workspace-relative key so it works for clones and VS Code variable expansion
+    $libraryKey = '${workspaceFolder}/types'
+    # Copy existing library entries where present (ConvertFrom-Json gives PSCustomObject)
+    $currentLib = @{}
+    if ($Settings.Lua.workspace.library) {
+        foreach ($p in $Settings.Lua.workspace.library.PSObject.Properties) {
+            $currentLib[$p.Name] = $p.Value
+        }
+    }
+    $currentLib[$libraryKey] = $true
+    $Settings.Lua.workspace.library = $currentLib
+
+    $Settings | ConvertTo-Json -Depth 64 | Out-File $EditorConfigPath -Encoding UTF8
+    Write-Host "Done! Lua workspace library updated and MCP server configured. Restart your editor now."
 }
 else {
     Write-Host "Lmaobox Context MCP Configuration"
