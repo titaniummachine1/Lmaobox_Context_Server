@@ -22,7 +22,7 @@ import (
 
 const (
 	SERVER_NAME    = "LmaoboxContext"
-	SERVER_VERSION = "1.0.6"
+	SERVER_VERSION = "1.1.0"
 )
 
 type BundleRequest struct {
@@ -51,8 +51,9 @@ type BundleContext struct {
 type LineMapEntry struct {
 	BundledStart int    `json:"bundledStart"` // first bundled line (1-based, inclusive)
 	BundledEnd   int    `json:"bundledEnd"`   // last bundled line (1-based, inclusive)
-	SourceFile   string `json:"sourceFile"`   // absolute path to source file
-	SourceStart  int    `json:"sourceStart"`  // source line that BundledStart maps to (always 1)
+	ModuleName   string `json:"moduleName,omitempty"`
+	SourceFile   string `json:"sourceFile"`  // absolute path to source file
+	SourceStart  int    `json:"sourceStart"` // source line that BundledStart maps to (always 1)
 }
 
 // BundleLineMap is written as JSON next to the bundle file (<bundle>.map).
@@ -75,9 +76,11 @@ var preferLuaLanguageServer bool
 
 // bundleLineMapRegexes are package-level to avoid recompilation on every call.
 var (
-	bundleHeaderEntryRe  = regexp.MustCompile(`^--\s+Entry point:\s+(.+?)\s*$`)
+	bundleHeaderEntryRe   = regexp.MustCompile(`^--\s+Entry point:\s+(.+?)\s*$`)
 	bundleModuleCommentRe = regexp.MustCompile(`^--\s+Module:\s+(.+?)\s*$`)
-	bundleEntryPointRe   = regexp.MustCompile(`^--\s+Entry point\s*$`) // no colon — section marker
+	bundleEntryPointRe    = regexp.MustCompile(`^--\s+Entry point\s*$`) // no colon — section marker
+	bundleRegisterRe      = regexp.MustCompile(`^__bundle_register\((?:"|')([^"']+)(?:"|'),\s*function\b`)
+	bundleHeaderBlockRe   = regexp.MustCompile(`^--\[\[\s*(.+?)\s*$`)
 )
 
 func main() {
@@ -172,10 +175,10 @@ func main() {
 	// Add traceback tool
 	tracebackTool := mcp.NewTool(
 		"traceback",
-		mcp.WithDescription("Map a line number in a bundled Lua file back to its original source file and line. Use this when Lmaobox reports an error with a bundled-file line number to instantly find the original source location without manually scanning the merged file."),
+		mcp.WithDescription("Resolve a bundled Lua line number to the owning module and line within that module using only the bundled file. Works with generated .map files when present and otherwise reconstructs ranges directly from bundle markers."),
 		mcp.WithString("bundleFile",
 			mcp.Required(),
-			mcp.Description("Absolute path to the bundled .lua file (e.g. /path/to/project/build/Main.lua) OR absolute path to the project directory (will look for build/Main.lua). A .map file must exist next to the bundle (created automatically by the bundle tool)."),
+			mcp.Description("Absolute path to the bundled .lua file (e.g. /path/to/project/build/Main.lua) OR absolute path to the project directory (will look for build/Main.lua). The tool works even if no .map file exists by reconstructing module ranges from the bundle itself."),
 		),
 		mcp.WithNumber("line",
 			mcp.Required(),
@@ -673,6 +676,7 @@ func generateBundledLua(bundleCtx *BundleContext, entryFile string) (string, []L
 			mapEntries = append(mapEntries, LineMapEntry{
 				BundledStart: currentLine,
 				BundledEnd:   currentLine + lineCount - 1,
+				ModuleName:   moduleName,
 				SourceFile:   filePath,
 				SourceStart:  1,
 			})
@@ -690,6 +694,7 @@ func generateBundledLua(bundleCtx *BundleContext, entryFile string) (string, []L
 		mapEntries = append(mapEntries, LineMapEntry{
 			BundledStart: currentLine,
 			BundledEnd:   currentLine + lineCount - 1,
+			ModuleName:   "__root",
 			SourceFile:   entryFile,
 			SourceStart:  1,
 		})
@@ -2285,7 +2290,7 @@ func parseBundleLineMap(bundleFilePath string) (BundleLineMap, error) {
 		}
 	}
 
-	// Scan for section markers.
+	// Scan for native generateBundledLua section markers first.
 	type section struct {
 		lineNum    int    // 1-based line number of the comment line
 		moduleName string // empty string = entry point section
@@ -2302,10 +2307,11 @@ func parseBundleLineMap(bundleFilePath string) (BundleLineMap, error) {
 	}
 
 	if len(sections) == 0 {
-		// Bundle was not produced by our bundler; return an empty map.
+		fallbackEntries := parseBundleRegisterSections(lines, projectDir, entryFileName)
 		return BundleLineMap{
 			BundleFile: filepath.Base(bundleFilePath),
 			ProjectDir: projectDir,
+			Entries:    fallbackEntries,
 		}, nil
 	}
 
@@ -2377,6 +2383,7 @@ func parseBundleLineMap(bundleFilePath string) (BundleLineMap, error) {
 		entries = append(entries, LineMapEntry{
 			BundledStart: contentStart,
 			BundledEnd:   contentEnd,
+			ModuleName:   sourceModuleName(sec.moduleName),
 			SourceFile:   sourceFilePath,
 			SourceStart:  1,
 		})
@@ -2387,6 +2394,117 @@ func parseBundleLineMap(bundleFilePath string) (BundleLineMap, error) {
 		ProjectDir: projectDir,
 		Entries:    entries,
 	}, nil
+}
+
+func parseBundleRegisterSections(lines []string, projectDir, entryFileName string) []LineMapEntry {
+	type registerSection struct {
+		registerLine  int
+		moduleName    string
+		sourceHintRaw string
+	}
+
+	var sections []registerSection
+	for i := 0; i < len(lines); i++ {
+		match := bundleRegisterRe.FindStringSubmatch(strings.TrimSpace(lines[i]))
+		if match == nil {
+			continue
+		}
+
+		sourceHintRaw := ""
+		if i+1 < len(lines) {
+			if headerMatch := bundleHeaderBlockRe.FindStringSubmatch(strings.TrimSpace(lines[i+1])); headerMatch != nil {
+				sourceHintRaw = strings.TrimSpace(headerMatch[1])
+			}
+		}
+
+		sections = append(sections, registerSection{
+			registerLine:  i + 1,
+			moduleName:    strings.TrimSpace(match[1]),
+			sourceHintRaw: sourceHintRaw,
+		})
+	}
+
+	if len(sections) == 0 {
+		return nil
+	}
+
+	lastMeaningfulLine := len(lines)
+	for lastMeaningfulLine > 0 && strings.TrimSpace(lines[lastMeaningfulLine-1]) == "" {
+		lastMeaningfulLine--
+	}
+
+	entries := make([]LineMapEntry, 0, len(sections))
+	for i, sec := range sections {
+		contentStart := sec.registerLine + 1
+		contentEnd := lastMeaningfulLine
+		if i+1 < len(sections) {
+			contentEnd = sections[i+1].registerLine - 1
+		}
+
+		for contentEnd >= contentStart {
+			trimmed := strings.TrimSpace(lines[contentEnd-1])
+			if trimmed == "" || trimmed == "return __bundle_require(\"__root\")" || trimmed == "return __bundle_require('__root')" || trimmed == "end)" || trimmed == "end" {
+				contentEnd--
+				continue
+			}
+			break
+		}
+
+		if contentEnd < contentStart {
+			contentEnd = contentStart
+		}
+
+		sourceFilePath := inferBundleSourceFile(projectDir, entryFileName, sec.moduleName, sec.sourceHintRaw)
+		entries = append(entries, LineMapEntry{
+			BundledStart: contentStart,
+			BundledEnd:   contentEnd,
+			ModuleName:   sourceModuleName(sec.moduleName),
+			SourceFile:   sourceFilePath,
+			SourceStart:  1,
+		})
+	}
+
+	return entries
+}
+
+func inferBundleSourceFile(projectDir, entryFileName, moduleName, sourceHintRaw string) string {
+	trimmedHint := strings.TrimSpace(sourceHintRaw)
+	if trimmedHint != "" {
+		cleanHint := strings.TrimPrefix(trimmedHint, "./")
+		cleanHint = filepath.Clean(strings.ReplaceAll(cleanHint, "\\", string(filepath.Separator)))
+		if filepath.IsAbs(cleanHint) {
+			return cleanHint
+		}
+		return filepath.Join(projectDir, cleanHint)
+	}
+
+	if moduleName == "__root" {
+		return filepath.Join(projectDir, entryFileName)
+	}
+
+	relPath := strings.ReplaceAll(moduleName, ".", string(filepath.Separator))
+	if !strings.HasSuffix(relPath, ".lua") {
+		relPath += ".lua"
+	}
+	directPath := filepath.Join(projectDir, relPath)
+	if _, err := os.Stat(directPath); err == nil {
+		return directPath
+	}
+
+	initPath := filepath.Join(projectDir, strings.TrimSuffix(relPath, ".lua"), "init.lua")
+	if _, err := os.Stat(initPath); err == nil {
+		return initPath
+	}
+
+	return directPath
+}
+
+func sourceModuleName(moduleName string) string {
+	trimmed := strings.TrimSpace(moduleName)
+	if trimmed == "" {
+		return "__root"
+	}
+	return trimmed
 }
 
 // resolveBundleMapPath resolves the .map file path from either a bundle .lua
@@ -2474,51 +2592,69 @@ func handleTraceback(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToo
 		)), nil
 	}
 
-	// Make the source file path relative to the project dir for readability
-	relPath := entry.SourceFile
-	if lineMap.ProjectDir != "" {
+	bundleLines, readErr := readLines(bundleLuaPath)
+	if readErr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to read bundle file: %v", readErr)), nil
+	}
+
+	moduleLine := sourceLine
+	moduleName := sourceModuleName(entry.ModuleName)
+	sourceHint := entry.SourceFile
+	if sourceHint != "" && lineMap.ProjectDir != "" {
 		if rel, rerr := filepath.Rel(lineMap.ProjectDir, entry.SourceFile); rerr == nil {
-			relPath = rel
+			sourceHint = rel
 		}
 	}
+	sourceHint = filepath.ToSlash(sourceHint)
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## traceback: bundled line %d\n\n", bundledLine))
-	sb.WriteString(fmt.Sprintf("**Source file:** `%s`\n", relPath))
-	sb.WriteString(fmt.Sprintf("**Source line:** %d\n", sourceLine))
-	sb.WriteString(fmt.Sprintf("**Bundle range:** lines %d-%d map to `%s`\n", entry.BundledStart, entry.BundledEnd, relPath))
+	sb.WriteString(fmt.Sprintf("**Module:** `%s`\n", moduleName))
+	sb.WriteString(fmt.Sprintf("**Line in module:** %d\n", moduleLine))
+	if sourceHint != "" {
+		sb.WriteString(fmt.Sprintf("**Source hint:** `%s`\n", sourceHint))
+	}
+	sb.WriteString(fmt.Sprintf("**Module range in bundle:** lines %d-%d\n", entry.BundledStart, entry.BundledEnd))
 
-	// Optionally show the source line content
-	if srcBytes, rerr := os.ReadFile(entry.SourceFile); rerr == nil {
-		srcLines := strings.Split(string(srcBytes), "\n")
-		if sourceLine >= 1 && sourceLine <= len(srcLines) {
-			lineContent := srcLines[sourceLine-1]
-			sb.WriteString(fmt.Sprintf("\n**Line content:**\n```lua\n%s\n```\n", lineContent))
-
-			// Show a few lines of context (±3)
-			contextStart := sourceLine - 3
-			if contextStart < 1 {
-				contextStart = 1
+	contextStart := bundledLine - 3
+	if contextStart < entry.BundledStart {
+		contextStart = entry.BundledStart
+	}
+	if contextStart < 1 {
+		contextStart = 1
+	}
+	contextEnd := bundledLine + 3
+	if contextEnd > entry.BundledEnd {
+		contextEnd = entry.BundledEnd
+	}
+	if contextEnd > len(bundleLines) {
+		contextEnd = len(bundleLines)
+	}
+	if contextEnd >= contextStart {
+		sb.WriteString("\n**Bundle context:**\n```lua\n")
+		for i := contextStart; i <= contextEnd; i++ {
+			marker := "  "
+			if i == bundledLine {
+				marker = ">>"
 			}
-			contextEnd := sourceLine + 3
-			if contextEnd > len(srcLines) {
-				contextEnd = len(srcLines)
-			}
-			if contextEnd > contextStart {
-				sb.WriteString("\n**Context:**\n```lua\n")
-				for i := contextStart; i <= contextEnd; i++ {
-					marker := "  "
-					if i == sourceLine {
-						marker = ">>"
-					}
-					sb.WriteString(fmt.Sprintf("%s %4d | %s\n", marker, i, srcLines[i-1]))
-				}
-				sb.WriteString("```\n")
-			}
+			sb.WriteString(fmt.Sprintf("%s %4d | %s\n", marker, i, bundleLines[i-1]))
 		}
+		sb.WriteString("```\n")
 	}
 
 	return mcp.NewToolResultText(sb.String()), nil
+}
+
+func readLines(filePath string) ([]string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(data), "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines, nil
 }
 
 func ensureDependencies() error {

@@ -927,9 +927,118 @@ func TestParseBundleLineMapFallbackInHandleTraceback(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("handleTraceback returned tool error: %v", result.Content)
 	}
-	// Result should mention a source file and a source line.
+	// Result should mention the module-centric mapping and bundle context.
 	resultText := fmt.Sprintf("%v", result.Content)
-	if !strings.Contains(resultText, "Source file") && !strings.Contains(resultText, "source") {
-		t.Errorf("expected result to mention source file, got: %s", resultText)
+	if !strings.Contains(resultText, "Module:") || !strings.Contains(resultText, "Line in module:") {
+		t.Errorf("expected result to mention module mapping, got: %s", resultText)
+	}
+	if !strings.Contains(resultText, "Bundle context:") {
+		t.Errorf("expected result to include bundle context, got: %s", resultText)
+	}
+	if !strings.Contains(resultText, "utils") {
+		t.Errorf("expected result to mention utils module, got: %s", resultText)
+	}
+}
+
+// TestParseBundleLineMapLuabundleStyle verifies traceback reconstruction for the
+// luabundle-style __bundle_register format, even when the original source files
+// do not exist next to the bundle.
+func TestParseBundleLineMapLuabundleStyle(t *testing.T) {
+	dir := t.TempDir()
+	bundleFile := filepath.Join(dir, "Main.lua")
+	bundleSrc := `local __bundle_require, __bundle_loaded, __bundle_register, __bundle_modules = (function(superRequire)
+	local loadingPlaceholder = {[{}] = true}
+	local register
+	local modules = {}
+	local require
+	local loaded = {}
+	register = function(name, body)
+		if not modules[name] then
+			modules[name] = body
+		end
+	end
+	require = function(name)
+		local loadedModule = loaded[name]
+		if loadedModule then
+			if loadedModule == loadingPlaceholder then
+				return nil
+			end
+		else
+			loaded[name] = loadingPlaceholder
+			loadedModule = modules[name](require, loaded, register, modules)
+			loaded[name] = loadedModule
+		end
+		return loadedModule
+	end
+	return require, loaded, register, modules
+end)(require)
+__bundle_register("__root", function(require, _LOADED, __bundle_register, __bundle_modules)
+--[[ Main.lua
+     Example entry module.
+]]
+local util = require("utils.math")
+print(util.add(1, 2))
+end)
+__bundle_register("utils.math", function(require, _LOADED, __bundle_register, __bundle_modules)
+--[[ utils/math.lua
+     Math helpers.
+]]
+local M = {}
+function M.add(a, b)
+	return a + b
+end
+return M
+end)
+return __bundle_require("__root")
+`
+	if err := os.WriteFile(bundleFile, []byte(bundleSrc), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	parsed, err := parseBundleLineMap(bundleFile)
+	if err != nil {
+		t.Fatalf("parseBundleLineMap: %v", err)
+	}
+	if len(parsed.Entries) != 2 {
+		t.Fatalf("expected 2 parsed entries, got %d: %#v", len(parsed.Entries), parsed.Entries)
+	}
+	if parsed.Entries[0].ModuleName != "__root" {
+		t.Fatalf("expected first module __root, got %q", parsed.Entries[0].ModuleName)
+	}
+	if parsed.Entries[1].ModuleName != "utils.math" {
+		t.Fatalf("expected second module utils.math, got %q", parsed.Entries[1].ModuleName)
+	}
+
+	result, herr := handleTraceback(context.Background(), mcp.CallToolRequest{
+		Params: struct {
+			Name      string                 `json:"name"`
+			Arguments map[string]interface{} `json:"arguments,omitempty"`
+			Meta      *struct {
+				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
+			} `json:"_meta,omitempty"`
+		}{
+			Name: "traceback",
+			Arguments: map[string]interface{}{
+				"bundleFile": bundleFile,
+				"line":       float64(parsed.Entries[1].BundledStart + 1),
+			},
+		},
+	})
+	if herr != nil {
+		t.Fatalf("handleTraceback error: %v", herr)
+	}
+	if result.IsError {
+		t.Fatalf("handleTraceback returned tool error: %v", result.Content)
+	}
+
+	resultText := fmt.Sprintf("%v", result.Content)
+	if !strings.Contains(resultText, "utils.math") {
+		t.Fatalf("expected traceback to mention utils.math module, got: %s", resultText)
+	}
+	if !strings.Contains(resultText, "utils/math.lua") {
+		t.Fatalf("expected traceback to include source hint from bundle header, got: %s", resultText)
+	}
+	if !strings.Contains(resultText, "**Line in module:** 2") {
+		t.Fatalf("expected traceback to report module-relative line 2, got: %s", resultText)
 	}
 }
