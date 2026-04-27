@@ -18,6 +18,20 @@ function activate(context) {
         vscode.commands.registerCommand('lmaoboxContext.installOrUpdateRuntime', async () => {
             await runAutomaticSetup(context, { interactive: true, force: true, reason: 'manual install command' });
         }),
+        vscode.commands.registerCommand('lmaoboxContext.injectLuaLibrary', async () => {
+            try {
+                await configureLuaLibrary(context, { interactive: true });
+                void vscode.window.showInformationMessage('Lmaobox: Lua workspace library injected into user settings.');
+            } catch (err) {
+                void vscode.window.showErrorMessage(`Failed to inject Lua workspace library: ${err.message}`);
+            }
+        }),
+        vscode.commands.registerCommand('lmaoboxContext.toggleAutoConfigureLuaLibrary', async () => {
+            const cfg = getExtensionConfig();
+            const current = cfg.get('autoConfigureLuaLibrary', true);
+            await cfg.update('autoConfigureLuaLibrary', !current, vscode.ConfigurationTarget.Global);
+            void vscode.window.showInformationMessage(`Lmaobox: autoConfigureLuaLibrary set to ${!current}`);
+        }),
         vscode.commands.registerCommand('lmaoboxContext.openRuntimeFolder', async () => {
             const runtime = await runAutomaticSetup(context, {
                 interactive: false,
@@ -219,7 +233,49 @@ async function ensureInstalledAndConfigured(context, options) {
         void vscode.window.showInformationMessage('Lmaobox Context runtime is installed and MCP settings are configured.');
     }
 
+    // Configure Lua language server workspace library entries if enabled
+    try {
+        if (getExtensionConfig().get('autoConfigureLuaLibrary', true)) {
+            await configureLuaLibrary(context, { interactive: mergedOptions.interactive });
+        }
+    } catch (err) {
+        console.warn('Failed to auto-configure Lua workspace library:', err);
+    }
+
     return { releaseTag: effectiveTag, runtimeDir, serverPath };
+}
+
+async function configureLuaLibrary(context, options = { interactive: false }) {
+    const luaConfig = vscode.workspace.getConfiguration('Lua');
+    const currentLib = luaConfig.get('workspace.library', {});
+
+    // Merge existing entries (preserve user values)
+    const merged = Object.assign({}, currentLib || {});
+
+    // Always add workspace-local types path (helps when editing this repo)
+    merged['${workspaceFolder}/types'] = true;
+
+    // Add global installed packaged types under %LOCALAPPDATA% if present
+    const home = process.env.LOCALAPPDATA || (os.homedir && path.join(os.homedir(), 'AppData', 'Local')) || '';
+    if (home) {
+        const globalTypes = path.join(home, 'lmaobox-context-server', 'types').replace(/\\/g, '/');
+        if (await pathExists(globalTypes)) {
+            merged[globalTypes] = true;
+        }
+    }
+
+    // Add extension-bundled types (assets/types) if present
+    const bundledTypes = path.join(context.extensionPath, 'assets', 'types').replace(/\\/g, '/');
+    if (await pathExists(bundledTypes)) {
+        merged[bundledTypes] = true;
+    }
+
+    // Update user settings (global) while preserving other Lua settings
+    await luaConfig.update('workspace.library', merged, vscode.ConfigurationTarget.Global);
+
+    if (options.interactive) {
+        void vscode.window.showInformationMessage('Lmaobox: Lua workspace library configured (types/ added). Restart the Lua language server if needed.');
+    }
 }
 
 function registerMcpServerDefinitionProvider(context) {

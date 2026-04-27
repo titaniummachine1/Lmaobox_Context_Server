@@ -149,6 +149,32 @@ When prompted by VS Code after clone, install recommended extensions to avoid mi
 - `emeraldwalk.runonsave` (auto-deploy prototypes on save)
 - `yzhang.markdown-all-in-one` (maintaining docs/smart context markdown)
 
+## VS Code: Sumneko (Lua) Auto-Configuration
+
+The extension and installer now attempt to make Sumneko (Lua language server) work out-of-the-box by adding our packaged `types/` annotations to the user's Lua workspace library.
+
+- On first-run the extension will try to auto-install `sumneko.lua` and will inject `Lua.workspace.library` entries into the user's settings (unless disabled).
+- The installer (`scripts/install.ps1`) copies the repo `types/` into `%LOCALAPPDATA%/lmaobox-context-server/types` so the annotations are available across workspaces.
+- If you prefer manual steps, run:
+
+```powershell
+# install runtime + copy packaged types to local appdata
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
+
+# inject Lua workspace library entries into your VS Code settings
+.\scripts\setup-mcp-config.ps1 -EditorConfigPath "$env:APPDATA\Code\User\settings.json"
+
+# install Sumneko extension (optional)
+code --install-extension sumneko.lua
+```
+
+The extension also exposes two commands:
+
+- `Lmaobox Context: Inject Lua Workspace Library` — manually injects the library entries into user settings.
+- `Lmaobox Context: Toggle Auto-Configure Lua Library` — toggles automatic injection on/off.
+
+If a user reports Sumneko is "broken", ask them to run the two commands above — most issues are resolved by installing the Sumneko extension and restarting the Lua language server.
+
 ## Contributor First-Clone Checklist
 
 1. Run `powershell -ExecutionPolicy Bypass -File scripts/install.ps1`
