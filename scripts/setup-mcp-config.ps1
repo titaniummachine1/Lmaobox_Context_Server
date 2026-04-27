@@ -68,6 +68,10 @@ elseif ($EditorConfigPath) {
 
     # Use workspace-relative key so it works for clones and VS Code variable expansion
     $libraryKey = '${workspaceFolder}/types'
+    # Also add a global installed path under %LOCALAPPDATA% so the packaged annotations are available for any workspace
+    $globalBase = Join-Path $env:LOCALAPPDATA "lmaobox-context-server"
+    $globalTypesPath = Join-Path $globalBase "types"
+    $globalTypesPath = $globalTypesPath -replace '\\', '/'
     # Copy existing library entries where present (ConvertFrom-Json gives PSCustomObject)
     $currentLib = @{}
     if ($Settings.Lua.workspace.library) {
@@ -76,6 +80,9 @@ elseif ($EditorConfigPath) {
         }
     }
     $currentLib[$libraryKey] = $true
+    if (Test-Path $globalTypesPath) {
+        $currentLib[$globalTypesPath] = $true
+    }
     $Settings.Lua.workspace.library = $currentLib
 
     $Settings | ConvertTo-Json -Depth 64 | Out-File $EditorConfigPath -Encoding UTF8
