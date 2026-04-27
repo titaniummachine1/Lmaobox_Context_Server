@@ -2,7 +2,7 @@
   "name": "lmaobox-context",
   "displayName": "Lmaobox Context",
   "description": "Zero-config MCP server extension for Lmaobox Lua docs, types, bundling, and linting in VS Code.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "titaniummachine1",
   "license": "MIT",
   "engines": {
