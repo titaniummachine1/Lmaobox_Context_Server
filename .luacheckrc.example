@@ -1,0 +1,53 @@
+-- .luacheckrc for Lmaobox Lua development
+-- This configuration suppresses false "undefined global" warnings for
+-- Lmaobox built-in globals that do NOT respond to Lua validation patterns.
+
+globals = {
+    -- Lmaobox built-in API namespaces
+    "http",      -- HTTP client
+    "entities",  -- Entity and player access
+    "callbacks", -- Event system
+    "engine",    -- Game engine API
+    "draw",      -- Drawing and rendering
+    "input",     -- Input handling
+    "profiler",  -- Profiling tools
+    "warp",      -- Warp/strafe triggers
+    
+    -- Lmaobox-specific utilities
+    "globals",   -- Global state module (preferred over _G)
+    "G",         -- Alias for globals module
+    
+    -- Custom user modules (add as needed)
+    -- "myModule",
+    -- "myUtils",
+}
+
+-- CRITICAL RULE: Do NOT use validation patterns like:
+--   if http then ... end
+--   if entities ~= nil then ... end
+--   type(callbacks) == "userdata"
+--   globals.http or fallback
+--
+-- REQUIRED PATTERN: Always use direct pcall() wrapping:
+--   local ok, result = pcall(function()
+--       return http.Get("https://example.com")
+--   end)
+--   if ok then print(result) end
+
+-- Disable warnings that conflict with the protocol
+read_globals = {
+    -- Lua 5.4 standard libraries
+    "string", "table", "math", "io", "os", "debug", "utf8",
+    "coroutine", "package", "assert", "error", "pairs", "ipairs",
+    "next", "rawget", "rawset", "rawlen", "setmetatable", "getmetatable",
+    "tonumber", "tostring", "type", "load", "loadstring", "dofile",
+}
+
+-- Maximum line length before warnings (helpful for maintainability)
+max_line_length = 120
+
+-- Enable strict mode to catch more issues
+strict = true
+
+-- Exclude certain warning codes (optional)
+-- ignore = { "211", "212" }  -- Unused variable, unused argument
