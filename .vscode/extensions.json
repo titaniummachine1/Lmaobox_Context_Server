@@ -1,5 +1,16 @@
 {
   "recommendations": [
+    "sumneko.lua",
+    "golang.go",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "ms-vscode.powershell",
+    "emeraldwalk.runonsave",
+    "yzhang.markdown-all-in-one"
+  ]
+}
+{
+  "recommendations": [
     "golang.go",
     "ms-python.python",
     "ms-python.vscode-pylance",

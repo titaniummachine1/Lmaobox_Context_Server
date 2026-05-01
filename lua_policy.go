@@ -7,25 +7,43 @@ import (
 	"strings"
 )
 
+// knownLmaoboxBuiltinGlobals are special userdata/function objects exposed by the
+// Lmaobox runtime that do NOT respond to Lua type() checks, field lookups, or
+// existence probes. They MUST be called directly inside pcall() without validation.
+var knownLmaoboxBuiltinGlobals = map[string]bool{
+	"http":      true,
+	"entities":  true,
+	"callbacks": true,
+	"engine":    true,
+	"draw":      true,
+	"input":     true,
+	"profiler":  true,
+	"warp":      true,
+	"math":      true, // Lua stdlib but should not be checked
+	"table":     true, // Lua stdlib but should not be checked
+	"string":    true, // Lua stdlib but should not be checked
+}
+
 type LboxMutationPolicy struct {
-	RequireDepthZeroRegister     bool
-	RequireDepthZeroUnregister   bool
-	RequireKillSwitchOrder       bool
-	ForbidRuntimeUnregister      bool
-	ForbidCollectGarbage         bool
-	ForbidRequireInFunction      bool
-	ForbidGlobalTable            bool
-	ForbidCreateFontInFunction   bool
-	ForbidLegacyBitLibrary       bool
-	ForbidDeprecatedCallbacks    bool
-	ForbidAllowListener          bool
-	ForbidForceFullUpdate        bool
-	RequireDrawTextFontSetup     bool
-	RequireDrawColorSetup        bool
-	ForbidWarpOutsideCreateMove  bool
-	ForbidSuspiciousSetupBones   bool
-	ForbidIpairsOnFindByClass    bool
-	RequireIsValidOnCachedEntity bool
+	RequireDepthZeroRegister            bool
+	RequireDepthZeroUnregister          bool
+	RequireKillSwitchOrder              bool
+	ForbidRuntimeUnregister             bool
+	ForbidCollectGarbage                bool
+	ForbidRequireInFunction             bool
+	ForbidGlobalTable                   bool
+	ForbidCreateFontInFunction          bool
+	ForbidLegacyBitLibrary              bool
+	ForbidDeprecatedCallbacks           bool
+	ForbidAllowListener                 bool
+	ForbidForceFullUpdate               bool
+	RequireDrawTextFontSetup            bool
+	RequireDrawColorSetup               bool
+	ForbidWarpOutsideCreateMove         bool
+	ForbidSuspiciousSetupBones          bool
+	ForbidIpairsOnFindByClass           bool
+	RequireIsValidOnCachedEntity        bool
+	ForbidBuiltinGlobalValidationChecks bool
 }
 
 type luaPolicyViolation struct {
@@ -68,25 +86,38 @@ type luaDrawAnalysisContext struct {
 }
 
 var defaultLboxMutationPolicy = LboxMutationPolicy{
-	RequireDepthZeroRegister:     true,
-	RequireDepthZeroUnregister:   true,
-	RequireKillSwitchOrder:       true,
-	ForbidRuntimeUnregister:      true,
-	ForbidCollectGarbage:         true,
-	ForbidRequireInFunction:      true,
-	ForbidGlobalTable:            true,
-	ForbidCreateFontInFunction:   true,
-	ForbidLegacyBitLibrary:       true,
-	ForbidDeprecatedCallbacks:    true,
-	ForbidAllowListener:          true,
-	ForbidForceFullUpdate:        true,
-	RequireDrawTextFontSetup:     true,
-	RequireDrawColorSetup:        true,
-	ForbidWarpOutsideCreateMove:  true,
-	ForbidSuspiciousSetupBones:   true,
-	ForbidIpairsOnFindByClass:    true,
-	RequireIsValidOnCachedEntity: true,
+	RequireDepthZeroRegister:            true,
+	RequireDepthZeroUnregister:          true,
+	RequireKillSwitchOrder:              true,
+	ForbidRuntimeUnregister:             true,
+	ForbidCollectGarbage:                true,
+	ForbidRequireInFunction:             true,
+	ForbidGlobalTable:                   true,
+	ForbidCreateFontInFunction:          true,
+	ForbidLegacyBitLibrary:              true,
+	ForbidDeprecatedCallbacks:           true,
+	ForbidAllowListener:                 true,
+	ForbidForceFullUpdate:               true,
+	RequireDrawTextFontSetup:            true,
+	RequireDrawColorSetup:               true,
+	ForbidWarpOutsideCreateMove:         true,
+	ForbidSuspiciousSetupBones:          true,
+	ForbidIpairsOnFindByClass:           true,
+	RequireIsValidOnCachedEntity:        true,
+	ForbidBuiltinGlobalValidationChecks: true,
 }
+
+// bundleMutationPolicy is used for the final validation pass on the merged
+// bundle file.  It is identical to defaultLboxMutationPolicy except that
+// ForbidRequireInFunction is disabled: the bundler wraps each module inside a
+// closure, so any top-level require() calls for global (non-bundled) modules
+// appear to the policy scanner as if they are inside a function -- which is
+// expected and harmless in the bundle context.  All other rules remain active.
+var bundleMutationPolicy = func() LboxMutationPolicy {
+	p := defaultLboxMutationPolicy
+	p.ForbidRequireInFunction = false // module wrappers make top-level requires appear in a function
+	return p
+}()
 
 func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) ([]luaPolicyViolation, error) {
 	contentBytes, err := os.ReadFile(filePath)
@@ -296,6 +327,9 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 		}
 		if policy.ForbidWarpOutsideCreateMove && strings.EqualFold(tok.Text, "warp") && functionDepth2 == 0 && i+3 < len(tokens) && tokens[i+1].Kind == "symbol" && tokens[i+1].Text == "." && tokens[i+2].Kind == "ident" && isWarpTriggerMethod(tokens[i+2].Text) && tokens[i+3].Kind == "symbol" && tokens[i+3].Text == "(" {
 			violations = append(violations, luaPolicyViolation{Line: tok.Line, Message: "CRITICAL: warp trigger calls must be made from a CreateMove callback only"})
+		}
+		if policy.ForbidBuiltinGlobalValidationChecks {
+			violations = append(violations, findBuiltinGlobalValidationViolations(tokens, i)...)
 		}
 	}
 
@@ -892,6 +926,101 @@ func findSuspiciousSetupBonesViolations(content string, tokens []luaToken) []lua
 
 func argContainsQualifiedCall(args [][]luaToken, root string, method string) bool {
 	return findQualifiedCallLineInArgs(args, root, []string{method}) > 0
+}
+
+func findBuiltinGlobalValidationViolations(tokens []luaToken, startIdx int) []luaPolicyViolation {
+	violations := make([]luaPolicyViolation, 0)
+	if startIdx >= len(tokens) {
+		return violations
+	}
+
+	tok := tokens[startIdx]
+
+	// Check if this is a known Lmaobox builtin global
+	globalName := strings.ToLower(tok.Text)
+	if !knownLmaoboxBuiltinGlobals[globalName] {
+		return violations
+	}
+
+	// Helper to find the previous non-whitespace token
+	getPrevNonWhitespace := func(idx int) int {
+		for i := idx - 1; i >= 0; i-- {
+			if tokens[i].Kind != "whitespace" {
+				return i
+			}
+		}
+		return -1
+	}
+
+	// Pattern 1: "if http then" or "if entities then"
+	prevIdx := getPrevNonWhitespace(startIdx)
+	if prevIdx >= 0 && tokens[prevIdx].Kind == "keyword" && tokens[prevIdx].Text == "if" {
+		violations = append(violations, luaPolicyViolation{
+			Line:    tok.Line,
+			Message: fmt.Sprintf("CRITICAL: Lmaobox built-in '%s' must NOT be validated with 'if' checks — use direct pcall() instead. Pattern: pcall(function() ... %s.SomeCall(...) ... end)", globalName, globalName),
+		})
+		return violations
+	}
+
+	// Pattern 2: "http ~= nil" or "entities == nil"
+	if startIdx+2 < len(tokens) && tokens[startIdx+1].Kind == "symbol" {
+		op := tokens[startIdx+1].Text
+		if (op == "~=" || op == "==" || op == "===" || op == "!=") && tokens[startIdx+2].Kind == "keyword" && tokens[startIdx+2].Text == "nil" {
+			violations = append(violations, luaPolicyViolation{
+				Line:    tok.Line,
+				Message: fmt.Sprintf("CRITICAL: Lmaobox built-in '%s' must NOT be checked against nil — the object exists but doesn't respond to validation. Use direct pcall() wrapping instead.", globalName),
+			})
+			return violations
+		}
+	}
+
+	// Pattern 3: "type(http)" or "type(entities)"
+	prevIdx = getPrevNonWhitespace(startIdx)
+	if prevIdx >= 0 && tokens[prevIdx].Kind == "ident" && strings.ToLower(tokens[prevIdx].Text) == "type" {
+		prevPrevIdx := getPrevNonWhitespace(prevIdx)
+		if prevPrevIdx >= 0 && tokens[prevPrevIdx].Kind == "symbol" && tokens[prevPrevIdx].Text == "(" {
+			violations = append(violations, luaPolicyViolation{
+				Line:    tok.Line,
+				Message: fmt.Sprintf("CRITICAL: type(%s) is not a valid validation pattern — Lmaobox built-ins don't respond to type() checks. Use direct pcall() wrapping instead.", globalName),
+			})
+			return violations
+		}
+	}
+
+	// Pattern 4: "globals.http" or "globals.entities" (indirect _G access)
+	prevIdx = getPrevNonWhitespace(startIdx)
+	if prevIdx >= 1 && tokens[prevIdx].Kind == "symbol" && tokens[prevIdx].Text == "." {
+		prevPrevIdx := getPrevNonWhitespace(prevIdx)
+		if prevPrevIdx >= 0 && tokens[prevPrevIdx].Kind == "ident" && tokens[prevPrevIdx].Text == "globals" {
+			violations = append(violations, luaPolicyViolation{
+				Line:    tok.Line,
+				Message: fmt.Sprintf("CRITICAL: Accessing Lmaobox built-in '%s' via 'globals.%s' requires direct pcall() wrapping — the indirection doesn't change the validation requirement", globalName, globalName),
+			})
+			return violations
+		}
+	}
+
+	// Pattern 5: standalone builtin global name in conditional context
+	// Look back for keywords to determine context
+	for j := startIdx - 1; j >= 0 && startIdx-j < 10; j-- {
+		if tokens[j].Kind == "whitespace" {
+			continue
+		}
+		if tokens[j].Kind == "keyword" {
+			if tokens[j].Text == "while" || tokens[j].Text == "until" || tokens[j].Text == "and" || tokens[j].Text == "or" {
+				violations = append(violations, luaPolicyViolation{
+					Line:    tok.Line,
+					Message: fmt.Sprintf("CRITICAL: Using '%s' in a conditional without pcall() validation is unsafe — Lmaobox built-ins require direct pcall(function() ... %s.Call(...) ... end) wrapping", globalName, globalName),
+				})
+				break
+			}
+			if tokens[j].Text == "local" || tokens[j].Text == "function" || tokens[j].Text == "return" {
+				break
+			}
+		}
+	}
+
+	return violations
 }
 
 func lineNumberForOffset(content string, offset int) int {

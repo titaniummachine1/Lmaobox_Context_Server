@@ -1,0 +1,22 @@
+{
+  "Lua": {
+    "runtime": {
+      "version": "Lua 5.4"
+    },
+    "workspace": {
+      "library": {
+        "${workspaceFolder}/types": true
+      },
+      "maxPreload": 2000,
+      "preloadFileSize": 200
+    }
+  },
+  "emeraldwalk.runonsave": {
+    "commands": [
+      {
+        "match": "prototypes/.*\\.lua$",
+        "cmd": "powershell -ExecutionPolicy Bypass -File \"${workspaceFolder}\\prototypes\\deploy.ps1\" \"${file}\""
+      }
+    ]
+  }
+}

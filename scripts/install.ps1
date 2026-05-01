@@ -109,6 +109,28 @@ else {
     Write-Host "[4/4] Skipping mcp.json update (-SkipMcpConfig)"
 }
 
+# ── 5. Install packaged types to a stable local folder so Sumneko can use them across workspaces
+Write-Host "[5/5] Installing packaged types to user local app data (for Sumneko)..."
+$globalBase = Join-Path $env:LOCALAPPDATA "lmaobox-context-server"
+$globalTypesDir = Join-Path $globalBase "types"
+$srcTypes = Join-Path $repoRoot "types"
+try {
+    if (Test-Path $srcTypes) {
+        if (Test-Path $globalTypesDir) {
+            Remove-Item -Path $globalTypesDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        New-Item -ItemType Directory -Path $globalTypesDir -Force | Out-Null
+        Copy-Item -Path (Join-Path $srcTypes "*") -Destination $globalTypesDir -Recurse -Force -ErrorAction Stop
+        Write-Host "  Packaged types copied to: $globalTypesDir" -ForegroundColor Green
+    }
+    else {
+        Write-Host "  No types/ directory found in repo; skipping packaged types install." -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host "  Failed to copy packaged types: $_" -ForegroundColor Yellow
+}
+
 # ── Optional: docs fetch ─────────────────────────────────────────────────────
 if (-not $SkipDocsFetch) {
     $fetchScript = Join-Path $scriptDir "fetch-upstream-docs.ps1"

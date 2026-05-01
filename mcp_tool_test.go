@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // ── MCP Tool Tests ──────────────────────────────────────────────────────────
@@ -500,5 +503,542 @@ local x = _G.someGlobal
 
 	if len(violations) == 0 {
 		t.Fatalf("expected _G dot-access violation")
+	}
+}
+
+// ── Traceback / Line-Map Tests ───────────────────────────────────────────────
+
+// TestCountLuaLines verifies line counting for content with/without trailing newline.
+func TestCountLuaLines(t *testing.T) {
+	cases := []struct {
+		content string
+		want    int
+	}{
+		{"", 0},
+		{"\n", 1},
+		{"a\n", 1},
+		{"a\nb\n", 2},
+		{"a\nb\nc\n", 3},
+		{"a\nb\nc", 3}, // no trailing newline
+		{"a", 1},
+	}
+	for _, c := range cases {
+		got := countLuaLines(c.content)
+		if got != c.want {
+			t.Errorf("countLuaLines(%q) = %d, want %d", c.content, got, c.want)
+		}
+	}
+}
+
+// TestLookupBundleLineInRange verifies that a line inside a mapped range resolves correctly.
+func TestLookupBundleLineInRange(t *testing.T) {
+	entries := []LineMapEntry{
+		{BundledStart: 10, BundledEnd: 19, SourceFile: "utils.lua", SourceStart: 1},
+		{BundledStart: 25, BundledEnd: 34, SourceFile: "main.lua", SourceStart: 1},
+	}
+
+	// Line 10 → utils.lua:1
+	e, sl, found := lookupBundleLine(entries, 10)
+	if !found || e.SourceFile != "utils.lua" || sl != 1 {
+		t.Fatalf("line 10: got (%s:%d, found=%v), want (utils.lua:1, true)", e.SourceFile, sl, found)
+	}
+
+	// Line 15 → utils.lua:6
+	e, sl, found = lookupBundleLine(entries, 15)
+	if !found || e.SourceFile != "utils.lua" || sl != 6 {
+		t.Fatalf("line 15: got (%s:%d, found=%v), want (utils.lua:6, true)", e.SourceFile, sl, found)
+	}
+
+	// Line 19 → utils.lua:10
+	e, sl, found = lookupBundleLine(entries, 19)
+	if !found || e.SourceFile != "utils.lua" || sl != 10 {
+		t.Fatalf("line 19: got (%s:%d, found=%v), want (utils.lua:10, true)", e.SourceFile, sl, found)
+	}
+
+	// Line 25 → main.lua:1
+	e, sl, found = lookupBundleLine(entries, 25)
+	if !found || e.SourceFile != "main.lua" || sl != 1 {
+		t.Fatalf("line 25: got (%s:%d, found=%v), want (main.lua:1, true)", e.SourceFile, sl, found)
+	}
+}
+
+// TestLookupBundleLineInfrastructure verifies that boilerplate lines return not-found.
+func TestLookupBundleLineInfrastructure(t *testing.T) {
+	entries := []LineMapEntry{
+		{BundledStart: 30, BundledEnd: 39, SourceFile: "utils.lua", SourceStart: 1},
+	}
+
+	// Lines before any mapped entry (bundle header boilerplate)
+	_, _, found := lookupBundleLine(entries, 1)
+	if found {
+		t.Fatal("expected line 1 (infrastructure) to not be found in map")
+	}
+
+	// Line between entries (module wrapper)
+	_, _, found = lookupBundleLine(entries, 25)
+	if found {
+		t.Fatal("expected line 25 (infrastructure gap) to not be found in map")
+	}
+}
+
+// TestGenerateBundledLuaLineMap verifies that generateBundledLua produces a line
+// map where every claimed source line lookups round-trips correctly.
+func TestGenerateBundledLuaLineMap(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create two simple modules
+	utilContent := "local M = {}\nfunction M.hello() return 'hi' end\nreturn M\n"
+	mainContent := "local utils = require('utils')\nprint(utils.hello())\n"
+
+	utilPath := filepath.Join(dir, "utils.lua")
+	mainPath := filepath.Join(dir, "Main.lua")
+	if err := os.WriteFile(utilPath, []byte(utilContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bundleCtx := &BundleContext{
+		ProjectDir:  dir,
+		SearchPaths: []string{dir},
+		Modules: map[string]*LuaModule{
+			utilPath: {FilePath: utilPath, Content: utilContent, Requires: nil},
+			mainPath: {FilePath: mainPath, Content: mainContent, Requires: []string{"utils"}},
+		},
+		Visited: map[string]bool{},
+		Stack:   map[string]bool{},
+	}
+
+	bundledContent, entries, err := generateBundledLua(bundleCtx, mainPath)
+	if err != nil {
+		t.Fatalf("generateBundledLua error: %v", err)
+	}
+
+	if len(bundledContent) == 0 {
+		t.Fatal("expected non-empty bundled content")
+	}
+
+	if len(entries) == 0 {
+		t.Fatal("expected at least one line map entry")
+	}
+
+	// Every entry range must be consistent: BundledEnd >= BundledStart
+	for _, e := range entries {
+		if e.BundledEnd < e.BundledStart {
+			t.Errorf("entry for %s has BundledEnd(%d) < BundledStart(%d)", e.SourceFile, e.BundledEnd, e.BundledStart)
+		}
+		if e.SourceStart != 1 {
+			t.Errorf("entry for %s has SourceStart=%d, want 1", e.SourceFile, e.SourceStart)
+		}
+	}
+
+	// The total bundled lines must fit within the bundled content
+	totalBundledLines := countLuaLines(bundledContent)
+	for _, e := range entries {
+		if e.BundledEnd > totalBundledLines {
+			t.Errorf("entry BundledEnd(%d) exceeds total bundled lines(%d) for %s", e.BundledEnd, totalBundledLines, e.SourceFile)
+		}
+	}
+}
+
+// TestResolveBundleMapPathDirectory verifies that passing a directory resolves
+// to build/Main.lua.map when it exists.
+func TestResolveBundleMapPathDirectory(t *testing.T) {
+	dir := t.TempDir()
+	buildDir := filepath.Join(dir, "build")
+	if err := os.MkdirAll(buildDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mapFile := filepath.Join(buildDir, "Main.lua.map")
+	if err := os.WriteFile(mapFile, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveBundleMapPath(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != mapFile {
+		t.Fatalf("got %s, want %s", got, mapFile)
+	}
+}
+
+// TestResolveBundleMapPathFile verifies that passing the bundle .lua file
+// resolves to the adjacent .map file when it exists.
+func TestResolveBundleMapPathFile(t *testing.T) {
+	dir := t.TempDir()
+	luaFile := filepath.Join(dir, "Main.lua")
+	mapFile := luaFile + ".map"
+	if err := os.WriteFile(luaFile, []byte("-- bundle"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mapFile, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveBundleMapPath(luaFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != mapFile {
+		t.Fatalf("got %s, want %s", got, mapFile)
+	}
+}
+
+// ── Bundle Policy / Full Heuristics Tests ────────────────────────────────────
+
+// TestBundlePolicyAllowsRequireInWrapper verifies that bundleMutationPolicy
+// does NOT flag require() inside a module wrapper function (the bundle format
+// wraps every module in a closure, so this would be a false positive).
+func TestBundlePolicyAllowsRequireInWrapper(t *testing.T) {
+	// Simulate what the bundler produces for a module with a global require:
+	// the module content appears inside __bundle_modules["name"] = function() ... end
+	src := `
+local __bundle_modules = {}
+local __bundle_loaded = {}
+local function __bundle_require(name)
+    local loader = __bundle_modules[name]
+    if loader == nil then return require(name) end
+    local cached = __bundle_loaded[name]
+    if cached ~= nil then return cached end
+    local loaded = loader()
+    if loaded == nil then loaded = true end
+    __bundle_loaded[name] = loaded
+    return loaded
+end
+
+__bundle_modules["utils"] = function()
+    local globalLib = require("SomeGlobalLib")
+    local M = {}
+    function M.hello() return globalLib.greet() end
+    return M
+end
+
+local running = true
+callbacks.unregister("Draw", "MyLoop")
+callbacks.register("Draw", "MyLoop", function()
+    if not running then return end
+end)
+callbacks.register("Unload", function()
+    running = false
+end)
+`
+	path := createTempLuaFile(t, "bundle_policy_require", src)
+
+	violations, err := checkLuaCallbackMutationPolicy(path, bundleMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+
+	// bundleMutationPolicy must not flag require() inside the module wrapper
+	for _, v := range violations {
+		if strings.Contains(v.Message, "require()") {
+			t.Fatalf("bundleMutationPolicy should not flag require() in bundle wrapper, got: %s", v.Message)
+		}
+	}
+}
+
+// TestBundlePolicyStillCatchesCallbackViolation verifies that bundleMutationPolicy
+// still flags a module that registers a callback at its source top-level (which
+// in the bundle becomes nested inside the module wrapper function -- a real issue).
+func TestBundlePolicyStillCatchesCallbackViolation(t *testing.T) {
+	// A module that had callbacks.register at its source top-level becomes wrapped:
+	src := `
+local __bundle_modules = {}
+local __bundle_loaded = {}
+local function __bundle_require(name)
+    if __bundle_modules[name] == nil then return require(name) end
+    local cached = __bundle_loaded[name]; if cached ~= nil then return cached end
+    local loaded = __bundle_modules[name](); if loaded == nil then loaded = true end
+    __bundle_loaded[name] = loaded; return loaded
+end
+
+__bundle_modules["badmodule"] = function()
+    callbacks.register("Draw", "BadDraw", function() end)
+end
+
+-- Entry point has proper kill-switch
+local running = true
+callbacks.unregister("Draw", "MyMain")
+callbacks.register("Draw", "MyMain", function()
+    if not running then return end
+end)
+callbacks.register("Unload", function() running = false end)
+`
+	path := createTempLuaFile(t, "bundle_policy_callback_violation", src)
+
+	violations, err := checkLuaCallbackMutationPolicy(path, bundleMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+
+	// Should catch that callbacks.register is inside a function (module wrapper)
+	if len(violations) == 0 {
+		t.Fatal("bundleMutationPolicy should still flag callbacks.register inside the module wrapper function")
+	}
+}
+
+// ── parseBundleLineMap (fallback, no .map file) Tests ────────────────────────
+
+// TestParseBundleLineMapBasic verifies that parseBundleLineMap correctly
+// reconstructs module line ranges from the bundle comment markers, so that
+// traceback works even when no .map file is present.
+func TestParseBundleLineMapBasic(t *testing.T) {
+	// Build a minimal bundle that matches the format generated by generateBundledLua.
+	// Infrastructure header (26 lines of newlines before first module, see constants
+	// in generateBundledLua) — we use the actual generator to produce a real bundle.
+	dir := t.TempDir()
+
+	// Create two small source files.
+	utilsSrc := "local M = {}\nfunction M.hello() return \"hi\" end\nreturn M\n"
+	mainSrc := "local u = require(\"utils\")\nprint(u.hello())\n"
+
+	utilsPath := filepath.Join(dir, "utils.lua")
+	mainPath := filepath.Join(dir, "Main.lua")
+	if err := os.WriteFile(utilsPath, []byte(utilsSrc), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a bundle using the real bundler context.
+	bundleCtx := &BundleContext{
+		ProjectDir:  dir,
+		SearchPaths: []string{dir},
+		Modules:     make(map[string]*LuaModule),
+		Visited:     make(map[string]bool),
+		Stack:       make(map[string]bool),
+	}
+	bundleCtx.Modules[utilsPath] = &LuaModule{FilePath: utilsPath, Content: utilsSrc}
+	bundleCtx.Modules[mainPath] = &LuaModule{FilePath: mainPath, Content: mainSrc}
+
+	bundledContent, mapEntries, err := generateBundledLua(bundleCtx, mainPath)
+	if err != nil {
+		t.Fatalf("generateBundledLua: %v", err)
+	}
+
+	// Write the bundle WITHOUT the .map file.
+	bundleFile := filepath.Join(dir, "bundle.lua")
+	if err := os.WriteFile(bundleFile, []byte(bundledContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// parseBundleLineMap must reconstruct the same ranges as the generator emitted.
+	parsed, err := parseBundleLineMap(bundleFile)
+	if err != nil {
+		t.Fatalf("parseBundleLineMap: %v", err)
+	}
+
+	if len(parsed.Entries) == 0 {
+		t.Fatal("expected at least one reconstructed entry")
+	}
+
+	// Cross-check: every entry from the generator must be covered by the parsed map.
+	for _, gen := range mapEntries {
+		matched := false
+		for _, p := range parsed.Entries {
+			if p.BundledStart == gen.BundledStart && p.BundledEnd == gen.BundledEnd {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Errorf("generator entry [%d-%d] for %s not found in parsed map (entries: %v)",
+				gen.BundledStart, gen.BundledEnd, gen.SourceFile, parsed.Entries)
+		}
+	}
+}
+
+// TestParseBundleLineMapFallbackInHandleTraceback verifies the end-to-end
+// fallback: handleTraceback must successfully resolve a line even when no .map
+// file exists alongside the bundle.
+func TestParseBundleLineMapFallbackInHandleTraceback(t *testing.T) {
+	dir := t.TempDir()
+
+	utilsSrc := "local M = {}\nfunction M.greet() return \"hello\" end\nreturn M\n"
+	mainSrc := "local u = require(\"utils\")\nprint(u.greet())\n"
+
+	utilsPath := filepath.Join(dir, "utils.lua")
+	mainPath := filepath.Join(dir, "Main.lua")
+	if err := os.WriteFile(utilsPath, []byte(utilsSrc), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bundleCtx := &BundleContext{
+		ProjectDir:  dir,
+		SearchPaths: []string{dir},
+		Modules:     make(map[string]*LuaModule),
+		Visited:     make(map[string]bool),
+		Stack:       make(map[string]bool),
+	}
+	bundleCtx.Modules[utilsPath] = &LuaModule{FilePath: utilsPath, Content: utilsSrc}
+	bundleCtx.Modules[mainPath] = &LuaModule{FilePath: mainPath, Content: mainSrc}
+
+	bundledContent, mapEntries, err := generateBundledLua(bundleCtx, mainPath)
+	if err != nil {
+		t.Fatalf("generateBundledLua: %v", err)
+	}
+	if len(mapEntries) == 0 {
+		t.Fatal("expected map entries from generator")
+	}
+
+	// Write bundle WITHOUT .map file.
+	buildDir := filepath.Join(dir, "build")
+	if err := os.MkdirAll(buildDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	bundleFile := filepath.Join(buildDir, "Main.lua")
+	if err := os.WriteFile(bundleFile, []byte(bundledContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Confirm no .map file exists.
+	if _, serr := os.Stat(bundleFile + ".map"); serr == nil {
+		t.Fatal("test setup error: .map file should not exist")
+	}
+
+	// Pick a known source line from the first map entry and look it up via the
+	// project-directory form of bundleFile (what the AI would supply).
+	firstEntry := mapEntries[0]
+	targetBundledLine := firstEntry.BundledStart + 0 // first line of first module
+
+	result, herr := handleTraceback(context.Background(), mcp.CallToolRequest{
+		Params: struct {
+			Name      string                 `json:"name"`
+			Arguments map[string]interface{} `json:"arguments,omitempty"`
+			Meta      *struct {
+				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
+			} `json:"_meta,omitempty"`
+		}{
+			Name: "traceback",
+			Arguments: map[string]interface{}{
+				"bundleFile": dir, // project directory — no .map exists
+				"line":       float64(targetBundledLine),
+			},
+		},
+	})
+	if herr != nil {
+		t.Fatalf("handleTraceback error: %v", herr)
+	}
+	if result.IsError {
+		t.Fatalf("handleTraceback returned tool error: %v", result.Content)
+	}
+	// Result should mention the module-centric mapping and bundle context.
+	resultText := fmt.Sprintf("%v", result.Content)
+	if !strings.Contains(resultText, "Module:") || !strings.Contains(resultText, "Line in module:") {
+		t.Errorf("expected result to mention module mapping, got: %s", resultText)
+	}
+	if !strings.Contains(resultText, "Bundle context:") {
+		t.Errorf("expected result to include bundle context, got: %s", resultText)
+	}
+	if !strings.Contains(resultText, "utils") {
+		t.Errorf("expected result to mention utils module, got: %s", resultText)
+	}
+}
+
+// TestParseBundleLineMapLuabundleStyle verifies traceback reconstruction for the
+// luabundle-style __bundle_register format, even when the original source files
+// do not exist next to the bundle.
+func TestParseBundleLineMapLuabundleStyle(t *testing.T) {
+	dir := t.TempDir()
+	bundleFile := filepath.Join(dir, "Main.lua")
+	bundleSrc := `local __bundle_require, __bundle_loaded, __bundle_register, __bundle_modules = (function(superRequire)
+	local loadingPlaceholder = {[{}] = true}
+	local register
+	local modules = {}
+	local require
+	local loaded = {}
+	register = function(name, body)
+		if not modules[name] then
+			modules[name] = body
+		end
+	end
+	require = function(name)
+		local loadedModule = loaded[name]
+		if loadedModule then
+			if loadedModule == loadingPlaceholder then
+				return nil
+			end
+		else
+			loaded[name] = loadingPlaceholder
+			loadedModule = modules[name](require, loaded, register, modules)
+			loaded[name] = loadedModule
+		end
+		return loadedModule
+	end
+	return require, loaded, register, modules
+end)(require)
+__bundle_register("__root", function(require, _LOADED, __bundle_register, __bundle_modules)
+--[[ Main.lua
+     Example entry module.
+]]
+local util = require("utils.math")
+print(util.add(1, 2))
+end)
+__bundle_register("utils.math", function(require, _LOADED, __bundle_register, __bundle_modules)
+--[[ utils/math.lua
+     Math helpers.
+]]
+local M = {}
+function M.add(a, b)
+	return a + b
+end
+return M
+end)
+return __bundle_require("__root")
+`
+	if err := os.WriteFile(bundleFile, []byte(bundleSrc), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	parsed, err := parseBundleLineMap(bundleFile)
+	if err != nil {
+		t.Fatalf("parseBundleLineMap: %v", err)
+	}
+	if len(parsed.Entries) != 2 {
+		t.Fatalf("expected 2 parsed entries, got %d: %#v", len(parsed.Entries), parsed.Entries)
+	}
+	if parsed.Entries[0].ModuleName != "__root" {
+		t.Fatalf("expected first module __root, got %q", parsed.Entries[0].ModuleName)
+	}
+	if parsed.Entries[1].ModuleName != "utils.math" {
+		t.Fatalf("expected second module utils.math, got %q", parsed.Entries[1].ModuleName)
+	}
+
+	result, herr := handleTraceback(context.Background(), mcp.CallToolRequest{
+		Params: struct {
+			Name      string                 `json:"name"`
+			Arguments map[string]interface{} `json:"arguments,omitempty"`
+			Meta      *struct {
+				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
+			} `json:"_meta,omitempty"`
+		}{
+			Name: "traceback",
+			Arguments: map[string]interface{}{
+				"bundleFile": bundleFile,
+				"line":       float64(parsed.Entries[1].BundledStart + 1),
+			},
+		},
+	})
+	if herr != nil {
+		t.Fatalf("handleTraceback error: %v", herr)
+	}
+	if result.IsError {
+		t.Fatalf("handleTraceback returned tool error: %v", result.Content)
+	}
+
+	resultText := fmt.Sprintf("%v", result.Content)
+	if !strings.Contains(resultText, "utils.math") {
+		t.Fatalf("expected traceback to mention utils.math module, got: %s", resultText)
+	}
+	if !strings.Contains(resultText, "utils/math.lua") {
+		t.Fatalf("expected traceback to include source hint from bundle header, got: %s", resultText)
+	}
+	if !strings.Contains(resultText, "**Line in module:** 2") {
+		t.Fatalf("expected traceback to report module-relative line 2, got: %s", resultText)
 	}
 }
