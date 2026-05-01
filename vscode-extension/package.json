@@ -22,9 +22,6 @@
     "onStartupFinished"
   ],
   "main": "./extension.js",
-  "extensionDependencies": [
-    "sumneko.lua"
-  ],
   "contributes": {
     "snippets": [
       {
@@ -48,6 +45,10 @@
       {
         "command": "lmaoboxContext.syncExternalMcpConfigs",
         "title": "Lmaobox Context: Sync External MCP Configs"
+      },
+      {
+        "command": "lmaoboxContext.injectLuaLibrary",
+        "title": "Lmaobox Context: Inject Lua Workspace Library"
       }
     ],
     "configuration": {
@@ -57,6 +58,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically write the MCP server entry into VS Code user settings after the runtime is installed."
+        },
+        "lmaoboxContext.autoConfigureLuaLibrary": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically configure LuaLS (Lua language server) workspace library paths for Lmaobox type definitions."
         },
         "lmaoboxContext.autoInjectExternalMcpConfigs": {
           "type": "boolean",

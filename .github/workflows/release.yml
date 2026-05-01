@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - "main"
+    paths:
+      - "vscode-extension/package.json"
+      - "vscode-extension/package-lock.json"
 
 concurrency:
   group: release-${{ github.ref }}
@@ -112,13 +117,29 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Verify extension version matches tag
+      - name: Resolve package version and release tag
+        id: release_meta
         shell: bash
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           PACKAGE_VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          else
+            RELEASE_TAG="v${PACKAGE_VERSION}"
+          fi
+
+          echo "package_version=${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify extension version matches tag
+        if: ${{ github.ref_type == 'tag' }}
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release_meta.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION="${{ steps.release_meta.outputs.package_version }}"
           EXPECTED_TAG="v${PACKAGE_VERSION}"
           if [ "${RELEASE_TAG}" != "${EXPECTED_TAG}" ]; then
             echo "Release tag ${RELEASE_TAG} does not match vscode-extension version ${PACKAGE_VERSION}."
@@ -146,7 +167,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          VERSION="${{ steps.release_meta.outputs.package_version }}"
           mkdir -p dist
           cd vscode-extension
           npx --yes @vscode/vsce package -o "../dist/lmaobox-context-${VERSION}.vsix"
@@ -167,6 +188,8 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.release_meta.outputs.release_tag }}
+          name: ${{ steps.release_meta.outputs.release_tag }}
           files: |
             dist/*.zip
             dist/checksums.txt
@@ -177,7 +200,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          VERSION="${{ steps.release_meta.outputs.package_version }}"
           npx --yes @vscode/vsce publish --packagePath "dist/lmaobox-context-${VERSION}.vsix"
 
   cleanup-workflow-runs:

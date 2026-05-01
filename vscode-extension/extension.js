@@ -8,7 +8,7 @@ const extract = require('extract-zip');
 
 const SERVER_ID = 'lmaobox-context';
 const MCP_PROVIDER_ID = 'lmaobox-provider';
-const SUMNEKO_EXTENSION_ID = 'sumneko.lua';
+const LUA_LANGUAGE_SERVER_EXTENSION_IDS = ['sumneko.lua', 'LuaLS.lua'];
 let setupInFlightPromise;
 let setupInFlightOptions;
 let warnedInvalidReleaseTag = false;
@@ -168,33 +168,39 @@ function getSuggestedFix(details) {
 }
 
 async function ensureSumnekoLuaLanguageServer(options) {
-    const alreadyInstalled = vscode.extensions.getExtension(SUMNEKO_EXTENSION_ID);
-    if (alreadyInstalled) {
+    const installedExtensionId = getInstalledLuaLanguageServerExtensionId();
+    if (installedExtensionId) {
         return true;
     }
 
-    try {
-        await vscode.commands.executeCommand('workbench.extensions.installExtension', SUMNEKO_EXTENSION_ID);
-    } catch (err) {
-        const message = `Failed to auto-install ${SUMNEKO_EXTENSION_ID}. MCP will still run, but Lua diagnostics may be reduced until it is installed.`;
-        console.warn(message, err);
-        if (options.interactive) {
-            void vscode.window.showWarningMessage(message);
+    for (const extensionId of LUA_LANGUAGE_SERVER_EXTENSION_IDS) {
+        try {
+            await vscode.commands.executeCommand('workbench.extensions.installExtension', extensionId);
+        } catch (err) {
+            console.warn(`Lua language server auto-install attempt failed for ${extensionId}.`, err);
         }
-        return false;
+
+        if (vscode.extensions.getExtension(extensionId)) {
+            return true;
+        }
     }
 
-    const installedNow = vscode.extensions.getExtension(SUMNEKO_EXTENSION_ID);
-    if (!installedNow) {
-        const message = `${SUMNEKO_EXTENSION_ID} install was requested but is not available yet. Restart Extensions if prompted.`;
-        console.warn(message);
-        if (options.interactive) {
-            void vscode.window.showWarningMessage(message);
+    const message = `Failed to auto-install a Lua language server extension (${LUA_LANGUAGE_SERVER_EXTENSION_IDS.join(', ')}). MCP will still run, but Lua diagnostics may be reduced until one is installed.`;
+    console.warn(message);
+    if (options.interactive) {
+        void vscode.window.showWarningMessage(message);
+    }
+    return false;
+}
+
+function getInstalledLuaLanguageServerExtensionId() {
+    for (const extensionId of LUA_LANGUAGE_SERVER_EXTENSION_IDS) {
+        if (vscode.extensions.getExtension(extensionId)) {
+            return extensionId;
         }
-        return false;
     }
 
-    return true;
+    return undefined;
 }
 
 async function ensureInstalledAndConfigured(context, options) {

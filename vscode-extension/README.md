@@ -33,11 +33,11 @@ The goal is "install extension and it just works": runtime download, MCP registr
 
 ## Lua Language Server Requirement
 
-This extension requires `sumneko.lua` and attempts to install it automatically during setup.
+This extension requires a Lua language server extension and attempts to install it automatically during setup.
 
 - If `sumneko.lua` is already installed, setup proceeds immediately.
 - If it is missing, the extension requests installation automatically.
-- If installation cannot complete (offline policy/store issue), MCP still starts, but Lua lint diagnostics may be reduced until `sumneko.lua` is available.
+- If installation cannot complete (offline policy/store issue), MCP still starts, but Lua lint diagnostics may be reduced until a Lua language server extension is available.
 
 MCP is configured with `--prefer-lua-ls`, so the Lua language server is the primary lint/diagnostic source for predictable workspace-aware checks.
 
