@@ -101,6 +101,27 @@ callbacks.register("Draw", "MyLoop", function() end)
 	}
 }
 
+func TestTopLevelRegisterAfterFunctionBlock(t *testing.T) {
+	src := `
+local function onEvent(event)
+    if event == nil then
+        return
+    end
+end
+
+callbacks.unregister("FireGameEvent", "Database_Events")
+callbacks.register("FireGameEvent", "Database_Events", onEvent)
+`
+	path := writeTempLua(t, "top_level_after_function", src)
+	violations, err := checkLuaCallbackMutationPolicy(path, defaultLboxMutationPolicy)
+	if err != nil {
+		t.Fatalf("policy check error: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("expected no violations for top-level callback pair, got: %+v", violations)
+	}
+}
+
 func TestUnregisterInOnUnload(t *testing.T) {
 	src := `
 callbacks.register("Unload", function()

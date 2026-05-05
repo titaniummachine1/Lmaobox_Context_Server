@@ -132,8 +132,7 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 	}
 
 	violations := make([]luaPolicyViolation, 0)
-	blockStack := make([]luaPolicyBlockKind, 0)
-	functionDepth := 0
+	functionDepthByLine := buildFunctionDepthByLine(tokens)
 	unregisteredAtDepthZero := make(map[string]bool)
 
 	for i := 0; i < len(tokens); i++ {
@@ -141,6 +140,7 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 
 		if method, args, endIndex, ok := extractCallbacksCall(tokens, i); ok {
 			line := tok.Line
+			lineDepth := functionDepthByLine[line]
 			eventName := stringArgValue(args, 0)
 			uniqueID := stringArgValue(args, 1)
 
@@ -148,10 +148,10 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 				if policy.ForbidDeprecatedCallbacks && strings.EqualFold(eventName, "PostPropUpdate") {
 					violations = append(violations, luaPolicyViolation{Line: line, Message: "CRITICAL: PostPropUpdate is deprecated legacy-only callback usage — use FrameStageNotify instead"})
 				}
-				if policy.RequireDepthZeroRegister && functionDepth > 0 {
+				if policy.RequireDepthZeroRegister && lineDepth > 0 {
 					violations = append(violations, luaPolicyViolation{Line: line, Message: "CRITICAL: callbacks.Register must be declared at depth 0 (global scope only)"})
 				}
-				if policy.RequireKillSwitchOrder && functionDepth == 0 && eventName != "" {
+				if policy.RequireKillSwitchOrder && lineDepth == 0 && eventName != "" {
 					killSwitchKeyExact := strings.ToLower(eventName + "|" + uniqueID)
 					killSwitchKeyEvent := strings.ToLower(eventName + "|")
 					hasExactMatch := unregisteredAtDepthZero[killSwitchKeyExact]
@@ -167,14 +167,14 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 					violations = append(violations, luaPolicyViolation{Line: line, Message: "CRITICAL: PostPropUpdate is deprecated legacy-only callback usage — use FrameStageNotify instead"})
 				}
 				reportedRuntimeUnregister := false
-				if policy.ForbidRuntimeUnregister && functionDepth > 0 {
+				if policy.ForbidRuntimeUnregister && lineDepth > 0 {
 					violations = append(violations, luaPolicyViolation{Line: line, Message: "CRITICAL: Illegal Unregister inside function scope (including Unload). Runtime callback table mutation is forbidden"})
 					reportedRuntimeUnregister = true
 				}
-				if policy.RequireDepthZeroUnregister && functionDepth > 0 && !reportedRuntimeUnregister {
+				if policy.RequireDepthZeroUnregister && lineDepth > 0 && !reportedRuntimeUnregister {
 					violations = append(violations, luaPolicyViolation{Line: line, Message: "CRITICAL: callbacks.Unregister must be declared at depth 0 (global scope only)"})
 				}
-				if functionDepth == 0 && eventName != "" {
+				if lineDepth == 0 && eventName != "" {
 					if uniqueID != "" {
 						unregisteredAtDepthZero[strings.ToLower(eventName+"|"+uniqueID)] = true
 					} else {
@@ -189,77 +189,49 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 				}
 			}
 
-			for j := i; j < endIndex; j++ {
+			// Scan nested callback calls inside argument tokens (e.g. inline
+			// function handlers) while skipping the root call at i to avoid
+			// duplicate reports.
+			for j := i + 1; j < endIndex; j++ {
 				t := tokens[j]
-				if t.Kind == "keyword" {
-					switch t.Text {
-					case "function":
-						blockStack = append(blockStack, luaBlockFunction)
-						functionDepth++
-					case "end":
-						if len(blockStack) > 0 {
-							for k := len(blockStack) - 1; k >= 0; k-- {
-								if blockStack[k] == luaBlockRepeat {
-									continue
-								}
-								if blockStack[k] == luaBlockFunction && functionDepth > 0 {
-									functionDepth--
-								}
-								blockStack = append(blockStack[:k], blockStack[k+1:]...)
-								break
-							}
-						}
+				if t.Kind != "ident" || !strings.EqualFold(t.Text, "callbacks") {
+					continue
+				}
+				nestedMethod, nestedArgs, _, nestedOk := extractCallbacksCall(tokens, j)
+				if !nestedOk {
+					continue
+				}
+
+				nestedLine := t.Line
+				nestedDepth := functionDepthByLine[nestedLine]
+				nestedEvent := stringArgValue(nestedArgs, 0)
+
+				if strings.EqualFold(nestedMethod, "register") {
+					if policy.ForbidDeprecatedCallbacks && strings.EqualFold(nestedEvent, "PostPropUpdate") {
+						violations = append(violations, luaPolicyViolation{Line: nestedLine, Message: "CRITICAL: PostPropUpdate is deprecated legacy-only callback usage — use FrameStageNotify instead"})
+					}
+					if policy.RequireDepthZeroRegister && nestedDepth > 0 {
+						violations = append(violations, luaPolicyViolation{Line: nestedLine, Message: "CRITICAL: callbacks.Register must be declared at depth 0 (global scope only)"})
 					}
 				}
-				if t.Kind == "ident" && strings.EqualFold(t.Text, "callbacks") {
-					if nestedMethod, _, _, nestedOk := extractCallbacksCall(tokens, j); nestedOk {
-						nestedLine := t.Line
-						if strings.EqualFold(nestedMethod, "unregister") && policy.ForbidRuntimeUnregister && functionDepth > 0 {
-							violations = append(violations, luaPolicyViolation{Line: nestedLine, Message: "CRITICAL: Illegal Unregister inside function scope (including Unload). Runtime callback table mutation is forbidden"})
-						}
-						if strings.EqualFold(nestedMethod, "register") && policy.RequireDepthZeroRegister && functionDepth > 0 {
-							violations = append(violations, luaPolicyViolation{Line: nestedLine, Message: "CRITICAL: callbacks.Register must be declared at depth 0 (global scope only)"})
-						}
+
+				if strings.EqualFold(nestedMethod, "unregister") {
+					if policy.ForbidDeprecatedCallbacks && strings.EqualFold(nestedEvent, "PostPropUpdate") {
+						violations = append(violations, luaPolicyViolation{Line: nestedLine, Message: "CRITICAL: PostPropUpdate is deprecated legacy-only callback usage — use FrameStageNotify instead"})
+					}
+					reportedRuntimeUnregister := false
+					if policy.ForbidRuntimeUnregister && nestedDepth > 0 {
+						violations = append(violations, luaPolicyViolation{Line: nestedLine, Message: "CRITICAL: Illegal Unregister inside function scope (including Unload). Runtime callback table mutation is forbidden"})
+						reportedRuntimeUnregister = true
+					}
+					if policy.RequireDepthZeroUnregister && nestedDepth > 0 && !reportedRuntimeUnregister {
+						violations = append(violations, luaPolicyViolation{Line: nestedLine, Message: "CRITICAL: callbacks.Unregister must be declared at depth 0 (global scope only)"})
 					}
 				}
 			}
 
 			i = endIndex
 			continue
-		}
-
-		if tok.Kind == "keyword" {
-			switch tok.Text {
-			case "function":
-				blockStack = append(blockStack, luaBlockFunction)
-				functionDepth++
-			case "if", "for", "while", "do":
-				blockStack = append(blockStack, luaBlockGeneric)
-			case "repeat":
-				blockStack = append(blockStack, luaBlockRepeat)
-			case "end":
-				if len(blockStack) > 0 {
-					for j := len(blockStack) - 1; j >= 0; j-- {
-						if blockStack[j] == luaBlockRepeat {
-							continue
-						}
-						if blockStack[j] == luaBlockFunction && functionDepth > 0 {
-							functionDepth--
-						}
-						blockStack = append(blockStack[:j], blockStack[j+1:]...)
-						break
-					}
-				}
-			case "until":
-				if len(blockStack) > 0 {
-					for j := len(blockStack) - 1; j >= 0; j-- {
-						if blockStack[j] == luaBlockRepeat {
-							blockStack = append(blockStack[:j], blockStack[j+1:]...)
-							break
-						}
-					}
-				}
-			}
 		}
 	}
 
@@ -346,7 +318,7 @@ func checkLuaCallbackMutationPolicy(filePath string, policy LboxMutationPolicy) 
 		violations = append(violations, findCachedEntityWithoutIsValidViolations(content, tokens)...)
 	}
 
-	return violations, nil
+	return dedupeLuaPolicyViolations(violations), nil
 }
 
 func findDrawStateViolations(content string, tokens []luaToken, policy LboxMutationPolicy) []luaPolicyViolation {
